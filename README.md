@@ -1,3 +1,6 @@
+<img width="1329" height="692" alt="image" src="https://github.com/user-attachments/assets/761e411f-8476-4a89-bcaf-897bd28a818c" />
+
+
 # Root da Galera
 
 Um app feito para os amigos, pra ninguém mais precisar lembrar na cabeça quem tá ganhando no Root.
@@ -29,3 +32,6 @@ Esse app nasceu pra resolver isso. A galera registra cada partida, e o sistema c
 - **Seasons** configuráveis manualmente, pra organizar ciclos de competição entre a galera
 - **Log de atividade** estilo terminal mostrando cada partida criada ou apagada, com horário e quem fez a ação
 - **Sistema de login simples** pra identificar quem registrou cada partida
+
+<img width="1329" height="692" alt="image" src="https://github.com/user-attachments/assets/ff99367a-dbb8-4f6d-a547-fd8f0368cf2b" />
+
