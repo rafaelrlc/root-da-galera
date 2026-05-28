@@ -47,8 +47,8 @@ export function PinGate() {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-white/20 bg-white/10">
               <LockKeyhole className="h-8 w-8" />
             </div>
-            <h1 className="storybook-title mt-4 text-4xl text-white">Entrar no Bosque</h1>
-            <p className="mt-2 text-sm text-cream/90">Digite seu PIN de 4 dígitos para desbloquear o placar.</p>
+            <h1 className="storybook-title mt-4 text-4xl text-white !text-white">Entrar na Resenha</h1>
+            <p className="mt-2 text-sm text-cream/90">Digite seu PIN de 4 dígitos para acessar.</p>
           </div>
 
           <div className="space-y-6 p-6">

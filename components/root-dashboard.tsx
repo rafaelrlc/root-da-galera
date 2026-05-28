@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { ChevronDown, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User } from "lucide-react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { ChevronDown, Download, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User } from "lucide-react";
 import { FACTIONS, FACTION_FILTERS, PLAYERS } from "@/lib/constants";
+import { exportMatchesToExcel } from "@/lib/export";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
 
@@ -26,18 +27,20 @@ export function RootDashboard({ initialData }: Props) {
   const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs">("register");
   const [desktopTab, setDesktopTab] = useState<"overview" | "records" | "seasons">("overview");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
   const [pending, startTransition] = useTransition();
   const [settingsPending, startSettingsTransition] = useTransition();
   const [currentSeasonNumber, setCurrentSeasonNumber] = useState(initialData.meta.currentSeasonNumber);
   const [form, setForm] = useState<FormState>({
-    winner: PLAYERS[0],
-    participants: [PLAYERS[0], PLAYERS[1], PLAYERS[2], PLAYERS[3]],
-    participantFactions: {
-      [PLAYERS[0]]: FACTIONS[0],
-      [PLAYERS[1]]: FACTIONS[1],
-      [PLAYERS[2]]: FACTIONS[2],
-      [PLAYERS[3]]: FACTIONS[3]
-    },
+    winner: "",
+    participants: [],
+    participantFactions: {},
     winningFaction: FACTIONS[0],
     playedAt: new Date().toISOString().slice(0, 10),
     seasonNumber: initialData.meta.currentSeasonNumber
@@ -134,11 +137,11 @@ export function RootDashboard({ initialData }: Props) {
         ? current.participants.filter((name) => name !== player)
         : [...current.participants, player];
 
-      if (nextParticipants.length < 4 || nextParticipants.length > 6) {
+      if (nextParticipants.length > 6) {
         return current;
       }
 
-      const winner = nextParticipants.includes(current.winner) ? current.winner : nextParticipants[0];
+      const winner = nextParticipants.includes(current.winner) ? current.winner : (nextParticipants[0] ?? "");
 
       const nextParticipantFactions = { ...current.participantFactions };
       if (!hasPlayer && !nextParticipantFactions[player]) {
@@ -191,6 +194,7 @@ export function RootDashboard({ initialData }: Props) {
       }
 
       await refreshData();
+      setToast("Partida registrada com sucesso!");
       setActiveTab("history");
     });
   }
@@ -232,6 +236,7 @@ export function RootDashboard({ initialData }: Props) {
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6">
+      <Toast message={toast} onClose={() => setToast(null)} />
       <div className="mx-auto flex max-w-6xl flex-col gap-5">
         <section className="forest-card relative z-20 overflow-visible !rounded-[36px]">
           <div className="relative overflow-visible rounded-[34px] bg-[linear-gradient(135deg,#7d9f57_0%,#4e6a35_100%)] px-4 py-2 text-cream sm:px-6 sm:py-3">
@@ -450,10 +455,14 @@ function RegisterPanel({
         <label className="space-y-2 text-sm font-semibold">
           <span>Vencedor</span>
           <select
-            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss disabled:opacity-50"
             value={form.winner}
+            disabled={form.participants.length === 0}
             onChange={(event) => onWinnerChange(event.target.value)}
           >
+            {form.participants.length === 0 && (
+              <option value="">Selecione participantes</option>
+            )}
             {form.participants.map((player) => (
               <option key={player} value={player}>
                 {player}
@@ -466,8 +475,8 @@ function RegisterPanel({
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-semibold">Participantes</span>
-          <span className="rounded-full bg-amberleaf/30 px-3 py-1 text-xs font-bold text-bark">
-            {form.participants.length}/6 jogadores
+          <span className={`rounded-full px-3 py-1 text-xs font-bold ${form.participants.length >= 4 ? "bg-amberleaf/30 text-bark" : "bg-berry/15 text-berry"}`}>
+            {form.participants.length}/6 jogadores {form.participants.length < 4 ? `(mín. 4)` : ""}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -518,7 +527,7 @@ function RegisterPanel({
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || form.participants.length < 4}
         className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-berry px-4 py-3 font-bold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {pending ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Trophy className="h-5 w-5" />}
@@ -670,20 +679,30 @@ function HistoryPanel({
           <h2 className="storybook-title text-2xl">Histórico de partidas</h2>
           <p className="mt-1 text-sm text-bark/70">Tudo fica aberto para o grupo adicionar ou apagar registros.</p>
         </div>
-        <label className="space-y-1 text-sm font-semibold">
-          <span>Filtrar por season</span>
-          <select
-            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-52"
-            value={seasonFilter}
-            onChange={(event) => onSeasonFilterChange(event.target.value)}
+        <div className="flex flex-col gap-2 sm:items-end">
+          <label className="space-y-1 text-sm font-semibold">
+            <span>Filtrar por season</span>
+            <select
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-52"
+              value={seasonFilter}
+              onChange={(event) => onSeasonFilterChange(event.target.value)}
+            >
+              {data.seasons.map((season) => (
+                <option key={season.value} value={season.value}>
+                  {season.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => exportMatchesToExcel(data.matches)}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-moss/30 bg-moss/10 px-4 py-2.5 text-sm font-bold text-moss transition hover:bg-moss/20"
           >
-            {data.seasons.map((season) => (
-              <option key={season.value} value={season.value}>
-                {season.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <Download className="h-4 w-4" />
+            Exportar Excel
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3">
@@ -893,6 +912,29 @@ function HistoryCard({
         >
           <Trash2 className="h-4 w-4" />
           Apagar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Toast({ message, onClose }: { message: string | null; onClose: () => void }) {
+  if (!message) return null;
+
+  return (
+    <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+      <div className="flex items-center gap-3 rounded-[22px] border border-white/30 bg-[linear-gradient(135deg,#7d9f57,#4e6a35)] px-5 py-3.5 text-white shadow-[0_8px_32px_rgba(0,0,0,0.25)] backdrop-blur-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-base">🏆</span>
+        <span className="text-sm font-bold">{message}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-1 rounded-full p-1 opacity-70 transition hover:opacity-100 hover:bg-white/20"
+          aria-label="Fechar"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
         </button>
       </div>
     </div>
