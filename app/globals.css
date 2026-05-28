@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-paper text-bark antialiased;
+  background-attachment: fixed;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+.forest-card {
+  @apply rounded-[28px] border-2 border-bark/10 bg-cream/90 shadow-story backdrop-blur-sm;
+}
+
+.leaf-chip {
+  @apply rounded-full border-2 border-bark/10 bg-white/70 px-3 py-1 text-sm font-semibold text-bark;
+}
+
+.storybook-title {
+  @apply font-display text-bark;
+}
