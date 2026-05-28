@@ -538,11 +538,11 @@ function RegisterPanel({
         <span className="text-sm font-semibold">Facções</span>
         <div className="space-y-2">
           {form.participants.map((player) => (
-            <div key={player} className="flex items-center gap-3 rounded-2xl border-2 border-bark/10 bg-white/50 px-3 py-2">
-              <span className={`w-20 shrink-0 text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
+            <div key={player} className="rounded-2xl border-2 border-bark/10 bg-white/50 px-3 py-2">
+              <span className={`mb-2 block text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
                 {player}
               </span>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="grid grid-cols-5 gap-1.5">
                 {FACTIONS.map((faction) => (
                   <button
                     key={faction}
@@ -757,7 +757,7 @@ function HistoryPanel({
 
 function LogsPanel({ logs }: { logs: ActivityLog[] }) {
   return (
-    <div className="flex h-full flex-col gap-4 overflow-hidden">
+    <div className="flex h-[60vh] flex-col gap-4 overflow-hidden xl:h-full">
       <div>
         <h2 className="storybook-title text-2xl">Logs</h2>
         <p className="mt-1 text-sm text-bark/70">Toda criação e exclusão de registro aparece aqui.</p>

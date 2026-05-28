@@ -234,15 +234,12 @@ export function StatsPanel({ data }: { data: DashboardData }) {
 
         {/* Evolução de vitórias */}
         <ChartCard title="Evolução de vitórias">
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={evolutionData} margin={{ left: 0, right: 16, top: 4 }}>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={evolutionData} margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5ddd0" />
               <XAxis dataKey="month" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip content={<CustomTooltip />} />
-              <Legend
-                formatter={(value) => <span className="text-xs font-semibold text-bark">{value}</span>}
-              />
               {activePlayers.map((player) => (
                 <Line
                   key={player}
@@ -256,6 +253,14 @@ export function StatsPanel({ data }: { data: DashboardData }) {
               ))}
             </LineChart>
           </ResponsiveContainer>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+            {activePlayers.map((player) => (
+              <span key={player} className="flex items-center gap-1.5 text-xs font-semibold text-bark">
+                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: PLAYER_COLORS[player] ?? "#888" }} />
+                {player}
+              </span>
+            ))}
+          </div>
         </ChartCard>
 
       </div>
