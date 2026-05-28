@@ -1,22 +1,31 @@
-# Root League
+# Root da Galera
 
-App em `Next.js + Tailwind` para registrar partidas de Root, calcular leaderboard geral e por facção, e acompanhar seasons de 6 semanas.
+Um app feito para os amigos, pra ninguém mais precisar lembrar na cabeça quem tá ganhando no Root.
 
-## Stack
+## O que é isso?
 
-- `Next.js` com App Router
-- `Tailwind CSS`
-- API routes no próprio Next
-- `Neon` ou qualquer Postgres compatível para persistência simples no deploy da Vercel
+Root é um jogo de tabuleiro assimétrico onde cada jogador controla uma facção com objetivos e habilidades completamente diferentes. É tenso, é divertido, e inevitavelmente gera discussão sobre quem é o melhor jogador da mesa.
 
-## Rodando localmente
+Esse app nasceu pra resolver isso. A galera registra cada partida, e o sistema cuida de tudo: ranking, estatísticas, histórico sem planilha, sem anotação no papel.
 
-1. Instale as dependências com `npm install`
-2. Configure `DATABASE_URL` no `.env.local`
-3. Rode `npm run dev`
+## Para que serve
 
-O schema é criado automaticamente na primeira execução das rotas.
+- Registrar partidas de Root entre os amigos, indicando quem jogou, quem ganhou e com qual facção
+- Acompanhar o ranking geral de vitórias da turma ao longo do tempo
+- Ver o winrate de cada jogador, tanto no geral quanto por facção específica
+- Descobrir quem é o melhor de cada facção
+- Organizar as partidas por seasons, pra ter ciclos de competição com começo, meio e fim
+- Consultar o histórico completo de todas as partidas já jogadas
+- Ver um log de atividade com tudo que foi registrado ou apagado
 
-## Deploy
+## Features
 
-Na Vercel, conecte um banco `Neon` ou outro Postgres compatível e exponha a variável `DATABASE_URL`. Depois disso, o app já sobe com persistência e sem autenticação.
+- **Leaderboard** com ranking por número de vitórias, winrate geral e total de partidas jogadas
+- **Filtro por season e por facção** — o ranking e as estatísticas se ajustam automaticamente ao filtro ativo
+- **Winrate por facção** — filtre por uma facção específica e veja o winrate de cada jogador só com aquela facção
+- **Registro de partidas** com seleção de 4 a 6 participantes, facção de cada jogador e facção vencedora
+- **Líderes por facção** — seção que mostra quem tem mais vitórias com cada uma das facções do jogo
+- **Histórico de partidas** com todos os registros e opção de apagar entradas erradas
+- **Seasons** configuráveis manualmente, pra organizar ciclos de competição entre a galera
+- **Log de atividade** estilo terminal mostrando cada partida criada ou apagada, com horário e quem fez a ação
+- **Sistema de login simples** pra identificar quem registrou cada partida
