@@ -121,20 +121,37 @@ export function RootDashboard({ initialData }: Props) {
   }, [filteredMatches, data.matches, seasonFilter, factionFilter]);
 
   const classLeaders = useMemo(() => {
+    const seasonMatches = data.matches.filter(
+      (match) => seasonFilter === "all" || match.seasonLabel === seasonFilter
+    );
+
     return FACTIONS.map((faction) => {
-      const scores = new Map<string, number>();
+      const winScores = new Map<string, number>();
       filteredMatches
         .filter((match) => match.winningFaction === faction)
-        .forEach((match) => scores.set(match.winner, (scores.get(match.winner) ?? 0) + 1));
+        .forEach((match) => winScores.set(match.winner, (winScores.get(match.winner) ?? 0) + 1));
 
-      const ranking = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+      const ranking = [...winScores.entries()].sort((a, b) => b[1] - a[1]);
+      const leader = ranking[0]?.[0] ?? null;
+      const wins = ranking[0]?.[1] ?? 0;
+
+      if (!leader) {
+        return { faction, leader: "Ninguém ainda", wins: 0, matchesPlayed: 0, winrate: null };
+      }
+
+      const matchesPlayed = seasonMatches.filter(
+        (match) => match.participants.includes(leader) && match.participantFactions[leader] === faction
+      ).length;
+
       return {
         faction,
-        leader: ranking[0]?.[0] ?? "Ninguém ainda",
-        wins: ranking[0]?.[1] ?? 0
+        leader,
+        wins,
+        matchesPlayed,
+        winrate: matchesPlayed > 0 ? wins / matchesPlayed : null
       };
     });
-  }, [filteredMatches]);
+  }, [filteredMatches, data.matches, seasonFilter]);
 
   function toggleParticipant(player: string) {
     setForm((current) => {
@@ -166,11 +183,17 @@ export function RootDashboard({ initialData }: Props) {
   }
 
   function handlePlayerFactionChange(player: string, faction: string) {
-    setForm((current) => ({
-      ...current,
-      participantFactions: { ...current.participantFactions, [player]: faction },
-      winningFaction: player === current.winner ? faction : current.winningFaction
-    }));
+    setForm((current) => {
+      const takenByOthers = current.participants
+        .filter((p) => p !== player)
+        .map((p) => current.participantFactions[p]);
+      if (faction !== "Vagabond" && takenByOthers.includes(faction)) return current;
+      return {
+        ...current,
+        participantFactions: { ...current.participantFactions, [player]: faction },
+        winningFaction: player === current.winner ? faction : current.winningFaction
+      };
+    });
   }
 
   async function refreshData() {
@@ -537,26 +560,38 @@ function RegisterPanel({
       <div className="space-y-2">
         <span className="text-sm font-semibold">Facções</span>
         <div className="space-y-2">
-          {form.participants.map((player) => (
-            <div key={player} className="rounded-2xl border-2 border-bark/10 bg-white/50 px-3 py-2">
-              <span className={`mb-2 block text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
-                {player}
-              </span>
-              <div className="grid grid-cols-5 gap-1.5">
-                {FACTIONS.map((faction) => (
-                  <button
-                    key={faction}
-                    type="button"
-                    title={faction}
-                    onClick={() => onPlayerFactionChange(player, faction)}
-                    className="flex items-center justify-center"
-                  >
-                    <FactionBadge faction={faction} iconOnly size="sm" selected={form.participantFactions[player] === faction} />
-                  </button>
-                ))}
+          {form.participants.map((player) => {
+            const takenByOthers = new Set(
+              form.participants
+                .filter((p) => p !== player)
+                .map((p) => form.participantFactions[p])
+                .filter(Boolean)
+            );
+            return (
+              <div key={player} className="rounded-2xl border-2 border-bark/10 bg-white/50 px-3 py-2">
+                <span className={`mb-2 block text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
+                  {player}
+                </span>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {FACTIONS.map((faction) => {
+                    const blocked = faction !== "Vagabond" && takenByOthers.has(faction);
+                    return (
+                      <button
+                        key={faction}
+                        type="button"
+                        title={blocked ? `${faction} já escolhida` : faction}
+                        disabled={blocked}
+                        onClick={() => onPlayerFactionChange(player, faction)}
+                        className={`flex items-center justify-center transition ${blocked ? "opacity-25 cursor-not-allowed" : ""}`}
+                      >
+                        <FactionBadge faction={faction} iconOnly size="sm" selected={form.participantFactions[player] === faction} />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -585,22 +620,27 @@ function LeaderboardPanel({
   seasonFilter: string;
   factionFilter: string;
   leaderboard: Array<{ player: string; wins: number; factionWins: [string, number][]; winrate: number | null; matchesPlayed: number }>;
-  classLeaders: Array<{ faction: string; leader: string; wins: number }>;
+  classLeaders: Array<{ faction: string; leader: string; wins: number; matchesPlayed: number; winrate: number | null }>;
   onSeasonFilterChange: (value: string) => void;
   onFactionFilterChange: (value: string) => void;
 }) {
   const [leadersExpanded, setLeadersExpanded] = useState(false);
+  const [sortBy, setSortBy] = useState<"wins" | "winrate">("wins");
+
+  const sortedLeaderboard = sortBy === "winrate"
+    ? [...leaderboard].sort((a, b) => (b.winrate ?? -1) - (a.winrate ?? -1) || b.wins - a.wins)
+    : leaderboard;
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-y-auto pr-1">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3">
         <div>
           <h2 className="storybook-title text-2xl">Leaderboard</h2>
           <p className="mt-1 text-sm text-bark/70">Veja o ranking geral e os melhores por facção.</p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-3 gap-3">
           <label className="space-y-1 text-sm font-semibold w-full">
-            <span>Filtrar por season</span>
+            <span>Season</span>
             <select
               className="w-full max-w-xs rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
               value={seasonFilter}
@@ -614,7 +654,7 @@ function LeaderboardPanel({
             </select>
           </label>
           <label className="space-y-1 text-sm font-semibold w-full">
-            <span>Filtrar por facção</span>
+            <span>Facção</span>
             <select
               className="w-full max-w-xs rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
               value={factionFilter}
@@ -628,11 +668,22 @@ function LeaderboardPanel({
               ))}
             </select>
           </label>
+          <label className="space-y-1 text-sm font-semibold w-full">
+            <span>Ordenar por</span>
+            <select
+              className="w-full max-w-xs rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as "wins" | "winrate")}
+            >
+              <option value="wins">Vitórias</option>
+              <option value="winrate">Winrate</option>
+            </select>
+          </label>
         </div>
       </div>
 
       <div className="grid gap-3">
-        {leaderboard.map((entry, index) => (
+        {sortedLeaderboard.map((entry, index) => (
           <div key={entry.player} className="rounded-[24px] border-2 border-bark/10 bg-white/65 p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -679,11 +730,21 @@ function LeaderboardPanel({
         </button>
         {leadersExpanded
           ? classLeaders.map((entry) => (
-              <div key={entry.faction} className="flex flex-col gap-3 rounded-[24px] border-2 border-bark/10 bg-white/65 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <FactionBadge faction={entry.faction} iconOnly size="lg" />
-                <div className="text-sm font-semibold text-bark">
-                  {entry.leader} {entry.wins > 0 ? `com ${entry.wins} vitória${entry.wins > 1 ? "s" : ""}` : "ainda sem vitórias"}
+              <div key={entry.faction} className="flex items-center justify-between gap-3 rounded-[24px] border-2 border-bark/10 bg-white/65 p-4">
+                <div className="flex items-center gap-3">
+                  <FactionBadge faction={entry.faction} iconOnly size="lg" />
+                  <div className="text-sm font-semibold text-bark">
+                    {entry.wins > 0
+                      ? <><span className="font-bold">{entry.leader}</span> · {entry.wins} vitória{entry.wins !== 1 ? "s" : ""} em {entry.matchesPlayed} partida{entry.matchesPlayed !== 1 ? "s" : ""}</>
+                      : <span className="text-bark/50">Ninguém ainda</span>}
+                  </div>
                 </div>
+                {entry.winrate !== null && (
+                  <div className="bg-white/70 border border-bark/10 px-3 py-2 text-center rounded-2xl shrink-0">
+                    <p className="text-base font-extrabold">{Math.round(entry.winrate * 100)}%</p>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-bark/55">winrate</p>
+                  </div>
+                )}
               </div>
             ))
           : null}
