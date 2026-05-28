@@ -38,3 +38,6 @@ Esse app nasceu pra resolver isso. A galera registra cada partida, e o sistema c
 
 <img width="1329" height="692" alt="image" src="https://github.com/user-attachments/assets/ff99367a-dbb8-4f6d-a547-fd8f0368cf2b" />
 
+<img width="1329" height="692" alt="image" src="https://github.com/user-attachments/assets/d626a0be-44db-42f4-bc6a-d8543687a4e1" />
+
+
