@@ -17,6 +17,7 @@ Esse app nasceu pra resolver isso. A galera registra cada partida, e o sistema c
 - Acompanhar o ranking geral de vitórias da turma ao longo do tempo
 - Ver o winrate de cada jogador, tanto no geral quanto por facção específica
 - Descobrir quem é o melhor de cada facção
+- Explorar estatísticas visuais das partidas em formato de gráficos
 - Organizar as partidas por seasons, pra ter ciclos de competição com começo, meio e fim
 - Consultar o histórico completo de todas as partidas já jogadas
 - Ver um log de atividade com tudo que foi registrado ou apagado
@@ -26,12 +27,14 @@ Esse app nasceu pra resolver isso. A galera registra cada partida, e o sistema c
 - **Leaderboard** com ranking por número de vitórias, winrate geral e total de partidas jogadas
 - **Filtro por season e por facção** — o ranking e as estatísticas se ajustam automaticamente ao filtro ativo
 - **Winrate por facção** — filtre por uma facção específica e veja o winrate de cada jogador só com aquela facção
+- **Estatísticas visuais** com quatro gráficos: vitórias por jogador (donut), vitórias por facção (barra), winrate por jogador (barra) e evolução acumulada de vitórias ao longo do tempo (linha)
 - **Registro de partidas** com seleção de 4 a 6 participantes, facção de cada jogador e facção vencedora
 - **Líderes por facção** — seção que mostra quem tem mais vitórias com cada uma das facções do jogo
-- **Histórico de partidas** com todos os registros e opção de apagar entradas erradas
+- **Histórico de partidas** com todos os registros, opção de apagar entradas erradas e exportação para Excel
 - **Seasons** configuráveis manualmente, pra organizar ciclos de competição entre a galera
 - **Log de atividade** estilo terminal mostrando cada partida criada ou apagada, com horário e quem fez a ação
-- **Sistema de login simples** pra identificar quem registrou cada partida
+- **Acesso como visitante** — qualquer pessoa pode ver o leaderboard, histórico, estatísticas e logs sem precisar de PIN
+- **Sistema de login por PIN** pra identificar quem registrou cada partida e liberar as ações de escrita
 
 <img width="1329" height="692" alt="image" src="https://github.com/user-attachments/assets/ff99367a-dbb8-4f6d-a547-fd8f0368cf2b" />
 
