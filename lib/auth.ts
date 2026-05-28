@@ -3,6 +3,7 @@ import { PLAYERS } from "@/lib/constants";
 import { MEMBER_PINS } from "@/lib/server/member-pins";
 
 export const SESSION_COOKIE = "root-league-member";
+export const GUEST_COOKIE = "root-league-guest";
 
 export function getMemberByPin(pin: string) {
   return (PLAYERS.find((player) => MEMBER_PINS[player] === pin) ?? null) as (typeof PLAYERS)[number] | null;
@@ -17,6 +18,11 @@ export async function getSessionUser() {
   }
 
   return member as (typeof PLAYERS)[number];
+}
+
+export async function getGuestSession(): Promise<boolean> {
+  const cookieStore = await cookies();
+  return cookieStore.get(GUEST_COOKIE)?.value === "1";
 }
 
 export async function requireSessionUser() {

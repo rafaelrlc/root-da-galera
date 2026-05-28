@@ -240,7 +240,7 @@ export async function deleteMatch(id: string, actorName: string) {
   }
 }
 
-export async function getDashboardData(currentUser: string): Promise<DashboardData> {
+export async function getDashboardData(currentUser: string, isGuest = false): Promise<DashboardData> {
   const currentSeasonNumber = await getCurrentSeasonNumber();
   const matches = await listMatches();
   const logs = await listLogs();
@@ -257,6 +257,7 @@ export async function getDashboardData(currentUser: string): Promise<DashboardDa
     meta: {
       currentSeasonNumber,
       currentSeasonLabel: `Season ${currentSeasonNumber}`,
+      isGuest,
       currentUser
     }
   };

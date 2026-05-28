@@ -31,5 +31,6 @@ export type DashboardData = {
     currentSeasonNumber: number;
     currentSeasonLabel: string;
     currentUser: string;
+    isGuest: boolean;
   };
 };

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { LockKeyhole } from "lucide-react";
+import { Eye, LockKeyhole } from "lucide-react";
 
 export function PinGate() {
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const [guestPending, startGuestTransition] = useTransition();
 
   function appendDigit(digit: string) {
     if (pin.length >= 4) return;
@@ -35,6 +36,13 @@ export function PinGate() {
         return;
       }
 
+      window.location.reload();
+    });
+  }
+
+  function enterAsGuest() {
+    startGuestTransition(async () => {
+      await fetch("/api/auth/guest", { method: "POST" });
       window.location.reload();
     });
   }
@@ -68,7 +76,7 @@ export function PinGate() {
                 <button
                   key={key}
                   type="button"
-                  disabled={pending}
+                  disabled={pending || guestPending}
                   onClick={() => {
                     if (key === "←") return backspace();
                     if (key === "OK") return submitPin();
@@ -79,6 +87,23 @@ export function PinGate() {
                   {key}
                 </button>
               ))}
+            </div>
+
+            <div className="pt-1">
+              <div className="relative flex items-center gap-3 py-1">
+                <div className="h-px flex-1 bg-bark/10" />
+                <span className="text-xs font-semibold text-bark/40 uppercase tracking-widest">ou</span>
+                <div className="h-px flex-1 bg-bark/10" />
+              </div>
+              <button
+                type="button"
+                onClick={enterAsGuest}
+                disabled={pending || guestPending}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-[22px] border-2 border-bark/10 bg-white/60 px-4 py-3 text-sm font-bold text-bark/70 transition hover:bg-white hover:text-bark disabled:opacity-50"
+              >
+                <Eye className="h-4 w-4" />
+                Entrar como visitante
+              </button>
             </div>
           </div>
         </section>

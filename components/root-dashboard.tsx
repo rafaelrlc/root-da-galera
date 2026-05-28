@@ -6,6 +6,7 @@ import { FACTIONS, FACTION_FILTERS, PLAYERS } from "@/lib/constants";
 import { exportMatchesToExcel } from "@/lib/export";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
+import { StatsPanel } from "@/components/stats-panel";
 
 type Props = {
   initialData: DashboardData;
@@ -22,10 +23,15 @@ type FormState = {
 
 export function RootDashboard({ initialData }: Props) {
   const [data, setData] = useState(initialData);
+  const isGuest = data.meta.isGuest;
   const [seasonFilter, setSeasonFilter] = useState("all");
   const [factionFilter, setFactionFilter] = useState<(typeof FACTION_FILTERS)[number]>("all");
-  const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs">("register");
-  const [desktopTab, setDesktopTab] = useState<"overview" | "records" | "seasons">("overview");
+  const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats">(
+    initialData.meta.isGuest ? "leaderboard" : "register"
+  );
+  const [desktopTab, setDesktopTab] = useState<"overview" | "leaderboard" | "records" | "seasons" | "stats">(
+    initialData.meta.isGuest ? "leaderboard" : "overview"
+  );
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -271,7 +277,7 @@ export function RootDashboard({ initialData }: Props) {
                   ) : null}
                 </div>
               </div>
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mt-2">
                 <div>
                   <h1 className="storybook-title text-xl sm:text-2xl !text-white">Root da Galera</h1>
                 </div>
@@ -287,12 +293,14 @@ export function RootDashboard({ initialData }: Props) {
         <section className="hidden gap-5 xl:block">
           <div className="forest-card p-4 sm:p-6">
             <div className="mb-4 flex flex-wrap gap-2">
-              <TabButton active={desktopTab === "overview"} onClick={() => setDesktopTab("overview")}>Partidas & Ranking</TabButton>
+              {!isGuest && <TabButton active={desktopTab === "overview"} onClick={() => setDesktopTab("overview")}>Partidas & Ranking</TabButton>}
+              {isGuest && <TabButton active={desktopTab === "leaderboard"} onClick={() => setDesktopTab("leaderboard")}>Leaderboard</TabButton>}
               <TabButton active={desktopTab === "records"} onClick={() => setDesktopTab("records")}>Histórico & Logs</TabButton>
-              <TabButton active={desktopTab === "seasons"} onClick={() => setDesktopTab("seasons")}>Seasons</TabButton>
+              <TabButton active={desktopTab === "stats"} onClick={() => setDesktopTab("stats")}>Estatísticas</TabButton>
+              {!isGuest && <TabButton active={desktopTab === "seasons"} onClick={() => setDesktopTab("seasons")}>Seasons</TabButton>}
             </div>
 
-            {desktopTab === "overview" ? (
+            {desktopTab === "overview" && !isGuest ? (
               <div className="grid gap-5 xl:grid-cols-2">
                 <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
                   <RegisterPanel
@@ -319,6 +327,20 @@ export function RootDashboard({ initialData }: Props) {
               </div>
             ) : null}
 
+            {desktopTab === "leaderboard" && isGuest ? (
+              <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
+                <LeaderboardPanel
+                  data={data}
+                  seasonFilter={seasonFilter}
+                  factionFilter={factionFilter}
+                  leaderboard={leaderboard}
+                  classLeaders={classLeaders}
+                  onSeasonFilterChange={setSeasonFilter}
+                  onFactionFilterChange={(value) => setFactionFilter(value as (typeof FACTION_FILTERS)[number])}
+                />
+              </div>
+            ) : null}
+
             {desktopTab === "records" ? (
               <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
                 <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
@@ -327,6 +349,7 @@ export function RootDashboard({ initialData }: Props) {
                     seasonFilter={seasonFilter}
                     filteredMatches={filteredMatches}
                     pending={pending}
+                    isGuest={isGuest}
                     onSeasonFilterChange={setSeasonFilter}
                     onDelete={removeMatch}
                   />
@@ -337,7 +360,13 @@ export function RootDashboard({ initialData }: Props) {
               </div>
             ) : null}
 
-            {desktopTab === "seasons" ? (
+            {desktopTab === "stats" ? (
+              <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
+                <StatsPanel data={data} />
+              </div>
+            ) : null}
+
+            {desktopTab === "seasons" && !isGuest ? (
               <div className="max-w-md">
                 <SeasonPanel
                   currentSeasonLabel={data.meta.currentSeasonLabel}
@@ -354,13 +383,14 @@ export function RootDashboard({ initialData }: Props) {
         <section className="grid gap-5 xl:hidden">
           <div className="forest-card p-4 sm:p-6">
             <div className="mb-4 flex flex-wrap gap-2">
-              <TabButton active={activeTab === "register"} onClick={() => setActiveTab("register")}>Nova partida</TabButton>
+              {!isGuest && <TabButton active={activeTab === "register"} onClick={() => setActiveTab("register")}>Nova partida</TabButton>}
               <TabButton active={activeTab === "leaderboard"} onClick={() => setActiveTab("leaderboard")}>Leaderboard</TabButton>
               <TabButton active={activeTab === "history"} onClick={() => setActiveTab("history")}>Histórico</TabButton>
+              <TabButton active={activeTab === "stats"} onClick={() => setActiveTab("stats")}>Estatísticas</TabButton>
               <TabButton active={activeTab === "logs"} onClick={() => setActiveTab("logs")}>Logs</TabButton>
             </div>
 
-            {activeTab === "register" ? (
+            {activeTab === "register" && !isGuest ? (
               <RegisterPanel
                 form={form}
                 pending={pending}
@@ -390,9 +420,14 @@ export function RootDashboard({ initialData }: Props) {
                 seasonFilter={seasonFilter}
                 filteredMatches={filteredMatches}
                 pending={pending}
+                isGuest={isGuest}
                 onSeasonFilterChange={setSeasonFilter}
                 onDelete={removeMatch}
               />
+            ) : null}
+
+            {activeTab === "stats" ? (
+              <StatsPanel data={data} />
             ) : null}
 
             {activeTab === "logs" ? (
@@ -401,7 +436,7 @@ export function RootDashboard({ initialData }: Props) {
           </div>
 
           <aside className="space-y-5">
-            {activeTab === "logs" ? (
+            {activeTab === "logs" && !isGuest ? (
               <SeasonPanel
                 currentSeasonLabel={data.meta.currentSeasonLabel}
                 currentSeasonNumber={currentSeasonNumber}
@@ -662,6 +697,7 @@ function HistoryPanel({
   seasonFilter,
   filteredMatches,
   pending,
+  isGuest,
   onSeasonFilterChange,
   onDelete
 }: {
@@ -669,6 +705,7 @@ function HistoryPanel({
   seasonFilter: string;
   filteredMatches: MatchRecord[];
   pending: boolean;
+  isGuest: boolean;
   onSeasonFilterChange: (value: string) => void;
   onDelete: (id: string) => Promise<void>;
 }) {
@@ -707,7 +744,7 @@ function HistoryPanel({
 
       <div className="grid gap-3">
         {filteredMatches.length > 0 ? (
-          filteredMatches.map((match) => <HistoryCard key={match.id} match={match} onDelete={onDelete} pending={pending} />)
+          filteredMatches.map((match) => <HistoryCard key={match.id} match={match} onDelete={onDelete} pending={pending} isGuest={isGuest} />)
         ) : (
           <div className="rounded-[24px] border-2 border-dashed border-bark/15 bg-white/45 p-8 text-center text-sm text-bark/60">
             Nenhuma partida registrada nesse filtro ainda.
@@ -882,11 +919,13 @@ function TabButton({
 function HistoryCard({
   match,
   onDelete,
-  pending
+  pending,
+  isGuest
 }: {
   match: MatchRecord;
   onDelete: (id: string) => Promise<void>;
   pending: boolean;
+  isGuest: boolean;
 }) {
   return (
     <div className="rounded-[24px] border-2 border-bark/10 bg-white/65 p-4">
@@ -904,7 +943,7 @@ function HistoryCard({
           </div>
           <FactionBadge faction={match.winningFaction} />
         </div>
-        <button
+        {!isGuest && <button
           type="button"
           onClick={() => onDelete(match.id)}
           disabled={pending}
@@ -912,7 +951,7 @@ function HistoryCard({
         >
           <Trash2 className="h-4 w-4" />
           Apagar
-        </button>
+        </button>}
       </div>
     </div>
   );
