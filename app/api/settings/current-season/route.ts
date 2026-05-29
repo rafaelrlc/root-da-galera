@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSessionUser } from "@/lib/auth";
 import { updateCurrentSeasonNumber } from "@/lib/db";
+import { isValidSeasonNumber } from "@/lib/seasons";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
   const payload = await request.json();
   const currentSeasonNumber = Number(payload?.currentSeasonNumber);
 
-  if (!Number.isInteger(currentSeasonNumber) || currentSeasonNumber < 1 || currentSeasonNumber > 12) {
+  if (!isValidSeasonNumber(currentSeasonNumber)) {
     return NextResponse.json({ error: "Season inválida." }, { status: 400 });
   }
 

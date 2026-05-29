@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { getMatchOpponents, getSortedScores, getVictoryRecipients } from "@/lib/match-utils";
 import type { MatchRecord } from "@/lib/types";
 
 function formatDate(value: string): string {
@@ -20,14 +21,18 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
     "Season",
     "Vencedor",
     "Facção vencedora",
+    "Dominância",
+    "Carta",
+    "Pontuações",
     "Participantes",
     "Facções dos participantes"
   ];
 
   const rows = matches.map((match, index) => {
-    const opponents = match.participants
-      .filter((p) => p !== match.winner)
-      .join(", ");
+    const opponents = getMatchOpponents(match).join(", ");
+    const scores = getSortedScores(match)
+      .map((entry) => `${entry.player}: ${entry.score}`)
+      .join(" | ");
 
     const factionList = match.participants
       .map((p) => `${p}: ${match.participantFactions[p] ?? "—"}`)
@@ -39,6 +44,9 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
       match.seasonLabel,
       match.winner,
       match.winningFaction,
+      match.wonByDominance ? "Sim" : "Não",
+      match.dominanceCard ?? "—",
+      scores || "—",
       `${match.winner} vs ${opponents}`,
       factionList
     ];
@@ -48,13 +56,16 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
 
   // Column widths
   matchSheet["!cols"] = [
-    { wch: 4 },   // #
-    { wch: 12 },  // Data
-    { wch: 12 },  // Season
-    { wch: 14 },  // Vencedor
-    { wch: 22 },  // Facção vencedora
-    { wch: 36 },  // Participantes
-    { wch: 72 }   // Facções
+    { wch: 4 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 28 },
+    { wch: 22 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 28 },
+    { wch: 36 },
+    { wch: 72 }
   ];
 
   // Bold header row
@@ -77,7 +88,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
       }
       const entry = playerMap.get(player)!;
       entry.played += 1;
-      if (player === match.winner) {
+      if (getVictoryRecipients(match).includes(player)) {
         entry.wins += 1;
         entry.factions.set(match.winningFaction, (entry.factions.get(match.winningFaction) ?? 0) + 1);
       }

@@ -2,8 +2,26 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronDown, Download, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User } from "lucide-react";
-import { FACTIONS, FACTION_FILTERS, PLAYERS } from "@/lib/constants";
+import { PlayerDominanceSelect } from "@/components/player-dominance-select";
+import { FACTIONS, FACTION_FILTERS, PLAYERS, type DominanceCard } from "@/lib/constants";
 import { exportMatchesToExcel } from "@/lib/export";
+import {
+  findVagabondPlayer,
+  formatCoalitionWinner,
+  formatParticipantDominances,
+  formatVagabondCoalitionNote,
+  getAvailableDominanceCards,
+  getFactionsInPlay,
+  getMatchOpponents,
+  getSortedScores,
+  getVictoryRecipients,
+  getWinnerDominanceCard,
+  getWinningFactions,
+  hasVagabondCoalition,
+  isCoalitionVictory,
+  sortFactionsForDisplay
+} from "@/lib/match-utils";
+import { MAX_SEASON_NUMBER, MIN_SEASON_NUMBER } from "@/lib/seasons";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
 import { StatsPanel } from "@/components/stats-panel";
@@ -16,10 +34,133 @@ type FormState = {
   winner: string;
   participants: string[];
   participantFactions: Record<string, string>;
+  participantScores: Record<string, string>;
+  participantDominances: Record<string, DominanceCard>;
   winningFaction: string;
   playedAt: string;
   seasonNumber: number;
+  coalitionPartner: string;
+  coalitionWon: boolean;
 };
+
+function createEmptyForm(seasonNumber: number): FormState {
+  return {
+    winner: "",
+    participants: [],
+    participantFactions: {},
+    participantScores: {},
+    participantDominances: {},
+    winningFaction: FACTIONS[0],
+    playedAt: new Date().toISOString().slice(0, 10),
+    seasonNumber,
+    coalitionPartner: "",
+    coalitionWon: false
+  };
+}
+
+function getCoalitionFaction(form: FormState) {
+  if (!form.coalitionPartner) return null;
+  const faction = form.participantFactions[form.coalitionPartner];
+  return faction && faction !== "Vagabond" ? faction : null;
+}
+
+function buildVagabondCoalition(form: FormState) {
+  const vagabond = findVagabondPlayer(form.participants, form.participantFactions);
+  const faction = getCoalitionFaction(form);
+  if (!vagabond || !form.participantDominances[vagabond] || !form.coalitionPartner || !faction) {
+    return null;
+  }
+
+  return {
+    vagabond,
+    partner: form.coalitionPartner,
+    faction
+  };
+}
+
+function buildMatchPayload(form: FormState) {
+  const participantDominances = { ...form.participantDominances };
+  const vagabondCoalition = buildVagabondCoalition(form);
+
+  const participantScores: Record<string, number> = {};
+  for (const player of form.participants) {
+    if (participantDominances[player]) continue;
+    const raw = form.participantScores[player]?.trim();
+    if (!raw) continue;
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 0) {
+      participantScores[player] = parsed;
+    }
+  }
+
+  const dominancesPayload =
+    Object.keys(participantDominances).length > 0 ? participantDominances : null;
+
+  if (form.coalitionWon && vagabondCoalition) {
+    return {
+      winner: formatCoalitionWinner([vagabondCoalition.vagabond, vagabondCoalition.partner]),
+      participants: form.participants,
+      participantFactions: form.participantFactions,
+      participantScores: Object.keys(participantScores).length ? participantScores : null,
+      participantDominances: dominancesPayload,
+      vagabondCoalition,
+      winningFaction: vagabondCoalition.faction,
+      coalitionWinners: [vagabondCoalition.vagabond, vagabondCoalition.partner],
+      coalitionWon: true,
+      dominanceCard: participantDominances[vagabondCoalition.vagabond],
+      playedAt: form.playedAt,
+      seasonNumber: form.seasonNumber
+    };
+  }
+
+  const winnerDominance = form.participantDominances[form.winner];
+
+  return {
+    winner: form.winner,
+    participants: form.participants,
+    participantFactions: form.participantFactions,
+    participantScores: Object.keys(participantScores).length ? participantScores : null,
+    participantDominances: dominancesPayload,
+    vagabondCoalition,
+    winningFaction: form.winningFaction,
+    coalitionWinners: null,
+    coalitionWon: false,
+    dominanceCard: winnerDominance ?? null,
+    playedAt: form.playedAt,
+    seasonNumber: form.seasonNumber
+  };
+}
+
+function validateFormScores(form: FormState) {
+  if (form.coalitionWon) return null;
+
+  const winnerDominance = form.participantDominances[form.winner];
+  if (winnerDominance) return null;
+
+  const scores: Record<string, number> = {};
+  for (const player of form.participants) {
+    if (form.participantDominances[player]) continue;
+    const raw = form.participantScores[player]?.trim();
+    if (!raw) continue;
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed >= 0) scores[player] = parsed;
+  }
+
+  if (Object.keys(scores).length === 0) return null;
+
+  const winnerScore = scores[form.winner];
+  if (winnerScore === undefined) {
+    return "O vencedor precisa ter pontuação quando não vence por dominância.";
+  }
+
+  for (const [player, score] of Object.entries(scores)) {
+    if (player !== form.winner && score > winnerScore) {
+      return `Ninguém pode ter mais pontos que o vencedor (${form.winner}: ${winnerScore}).`;
+    }
+  }
+
+  return null;
+}
 
 export function RootDashboard({ initialData }: Props) {
   const [data, setData] = useState(initialData);
@@ -43,14 +184,7 @@ export function RootDashboard({ initialData }: Props) {
   const [pending, startTransition] = useTransition();
   const [settingsPending, startSettingsTransition] = useTransition();
   const [currentSeasonNumber, setCurrentSeasonNumber] = useState(initialData.meta.currentSeasonNumber);
-  const [form, setForm] = useState<FormState>({
-    winner: "",
-    participants: [],
-    participantFactions: {},
-    winningFaction: FACTIONS[0],
-    playedAt: new Date().toISOString().slice(0, 10),
-    seasonNumber: initialData.meta.currentSeasonNumber
-  });
+  const [form, setForm] = useState<FormState>(() => createEmptyForm(initialData.meta.currentSeasonNumber));
 
   const filteredMatches = useMemo(() => {
     return data.matches.filter((match) => {
@@ -78,10 +212,12 @@ export function RootDashboard({ initialData }: Props) {
     );
 
     filteredMatches.forEach((match) => {
-      totals.set(match.winner, (totals.get(match.winner) ?? 0) + 1);
-      const playerFactionMap = byFaction.get(match.winner) ?? new Map<string, number>();
-      playerFactionMap.set(match.winningFaction, (playerFactionMap.get(match.winningFaction) ?? 0) + 1);
-      byFaction.set(match.winner, playerFactionMap);
+      getVictoryRecipients(match).forEach((player) => {
+        totals.set(player, (totals.get(player) ?? 0) + 1);
+        const playerFactionMap = byFaction.get(player) ?? new Map<string, number>();
+        playerFactionMap.set(match.winningFaction, (playerFactionMap.get(match.winningFaction) ?? 0) + 1);
+        byFaction.set(player, playerFactionMap);
+      });
     });
 
     seasonMatches.forEach((match) => {
@@ -126,32 +262,45 @@ export function RootDashboard({ initialData }: Props) {
     );
 
     return FACTIONS.map((faction) => {
-      const winScores = new Map<string, number>();
-      filteredMatches
-        .filter((match) => match.winningFaction === faction)
-        .forEach((match) => winScores.set(match.winner, (winScores.get(match.winner) ?? 0) + 1));
+      const stats = PLAYERS.map((player) => {
+        const wins = seasonMatches.filter(
+          (match) => getVictoryRecipients(match).includes(player) && match.winningFaction === faction
+        ).length;
+        const matchesPlayed = seasonMatches.filter(
+          (match) => match.participants.includes(player) && match.participantFactions[player] === faction
+        ).length;
+        const winrate = matchesPlayed > 0 ? wins / matchesPlayed : null;
 
-      const ranking = [...winScores.entries()].sort((a, b) => b[1] - a[1]);
-      const leader = ranking[0]?.[0] ?? null;
-      const wins = ranking[0]?.[1] ?? 0;
+        return { player, wins, matchesPlayed, winrate };
+      }).filter((entry) => entry.matchesPlayed > 0);
 
-      if (!leader) {
-        return { faction, leader: "Ninguém ainda", wins: 0, matchesPlayed: 0, winrate: null };
+      if (stats.length === 0) {
+        return { faction, leaders: [] as string[], wins: 0, matchesPlayed: 0, winrate: null, isTie: false };
       }
 
-      const matchesPlayed = seasonMatches.filter(
-        (match) => match.participants.includes(leader) && match.participantFactions[leader] === faction
-      ).length;
+      const maxWins = Math.max(...stats.map((entry) => entry.wins));
+      if (maxWins === 0) {
+        return { faction, leaders: [] as string[], wins: 0, matchesPlayed: 0, winrate: null, isTie: false };
+      }
+      const topByWins = stats.filter((entry) => entry.wins === maxWins);
+      const maxWinrate = Math.max(...topByWins.map((entry) => entry.winrate ?? 0));
+      const leaders = topByWins
+        .filter((entry) => (entry.winrate ?? 0) === maxWinrate)
+        .map((entry) => entry.player)
+        .sort((a, b) => a.localeCompare(b));
+
+      const topStat = stats.find((entry) => entry.player === leaders[0])!;
 
       return {
         faction,
-        leader,
-        wins,
-        matchesPlayed,
-        winrate: matchesPlayed > 0 ? wins / matchesPlayed : null
+        leaders,
+        wins: topStat.wins,
+        matchesPlayed: topStat.matchesPlayed,
+        winrate: topStat.winrate,
+        isTie: leaders.length > 1
       };
     });
-  }, [filteredMatches, data.matches, seasonFilter]);
+  }, [data.matches, seasonFilter]);
 
   function toggleParticipant(player: string) {
     setForm((current) => {
@@ -167,16 +316,29 @@ export function RootDashboard({ initialData }: Props) {
       const winner = nextParticipants.includes(current.winner) ? current.winner : (nextParticipants[0] ?? "");
 
       const nextParticipantFactions = { ...current.participantFactions };
+      const nextParticipantScores = { ...current.participantScores };
+      const nextParticipantDominances = { ...current.participantDominances };
       if (!hasPlayer && !nextParticipantFactions[player]) {
         const usedFactions = new Set(Object.values(nextParticipantFactions));
         nextParticipantFactions[player] = FACTIONS.find((f) => !usedFactions.has(f)) ?? FACTIONS[0];
+        nextParticipantScores[player] = nextParticipantScores[player] ?? "";
+      } else if (hasPlayer) {
+        delete nextParticipantScores[player];
+        delete nextParticipantDominances[player];
       }
+
+      const coalitionPartner = nextParticipants.includes(current.coalitionPartner)
+        ? current.coalitionPartner
+        : "";
 
       return {
         ...current,
         participants: nextParticipants,
         winner,
         participantFactions: nextParticipantFactions,
+        participantScores: nextParticipantScores,
+        participantDominances: nextParticipantDominances,
+        coalitionPartner,
         winningFaction: nextParticipantFactions[winner] ?? current.winningFaction
       };
     });
@@ -188,9 +350,16 @@ export function RootDashboard({ initialData }: Props) {
         .filter((p) => p !== player)
         .map((p) => current.participantFactions[p]);
       if (faction !== "Vagabond" && takenByOthers.includes(faction)) return current;
+
+      const coalitionPartner =
+        current.coalitionPartner === player && faction === "Vagabond"
+          ? ""
+          : current.coalitionPartner;
+
       return {
         ...current,
         participantFactions: { ...current.participantFactions, [player]: faction },
+        coalitionPartner,
         winningFaction: player === current.winner ? faction : current.winningFaction
       };
     });
@@ -210,19 +379,41 @@ export function RootDashboard({ initialData }: Props) {
 
   async function submitMatch(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const vagabond = findVagabondPlayer(form.participants, form.participantFactions);
+    const vagabondDominance = vagabond ? form.participantDominances[vagabond] : undefined;
+
+    if (vagabondDominance && !form.coalitionPartner) {
+      alert("O Vagabond com dominância precisa escolher o parceiro da coalizão.");
+      return;
+    }
+
+    if (form.coalitionWon && !buildVagabondCoalition(form)) {
+      alert("Marque vitória da coalizão só com Vagabond, dominância e parceiro configurados.");
+      return;
+    }
+
+    const scoreError = validateFormScores(form);
+    if (scoreError) {
+      alert(scoreError);
+      return;
+    }
+
     startTransition(async () => {
       const response = await fetch("/api/matches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+        body: JSON.stringify(buildMatchPayload(form))
       });
 
       if (!response.ok) {
-        alert("Não foi possível registrar a partida.");
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        alert(body?.error ?? "Não foi possível registrar a partida.");
         return;
       }
 
       await refreshData();
+      setForm(createEmptyForm(currentSeasonNumber));
       setToast("Partida registrada com sucesso!");
       setActiveTab("history");
     });
@@ -334,6 +525,63 @@ export function RootDashboard({ initialData }: Props) {
                     onDateChange={(playedAt) => setForm((current) => ({ ...current, playedAt }))}
                     onPlayerFactionChange={handlePlayerFactionChange}
                     onToggleParticipant={toggleParticipant}
+                    onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
+                    onScoreChange={(player, value) =>
+                      setForm((current) => {
+                        const nextDominances = { ...current.participantDominances };
+                        delete nextDominances[player];
+                        return {
+                          ...current,
+                          participantScores: { ...current.participantScores, [player]: value },
+                          participantDominances: nextDominances
+                        };
+                      })
+                    }
+                    onDominanceChange={(player, card) =>
+                      setForm((current) => {
+                        const nextDominances = { ...current.participantDominances };
+                        if (card) {
+                          nextDominances[player] = card;
+                        } else {
+                          delete nextDominances[player];
+                        }
+                        const nextScores = { ...current.participantScores };
+                        if (card) delete nextScores[player];
+                        const vagabond = findVagabondPlayer(current.participants, current.participantFactions);
+                        const clearingVagabondDominance = player === vagabond && !card;
+                        return {
+                          ...current,
+                          participantDominances: nextDominances,
+                          participantScores: nextScores,
+                          coalitionPartner: clearingVagabondDominance ? "" : current.coalitionPartner,
+                          coalitionWon: clearingVagabondDominance ? false : current.coalitionWon
+                        };
+                      })
+                    }
+                    onCoalitionPartnerChange={(coalitionPartner) =>
+                      setForm((current) => {
+                        const next = { ...current, coalitionPartner };
+                        const faction = getCoalitionFaction(next);
+                        return {
+                          ...next,
+                          winningFaction:
+                            current.coalitionWon && faction ? faction : current.winningFaction
+                        };
+                      })
+                    }
+                    onCoalitionWonChange={(coalitionWon) =>
+                      setForm((current) => {
+                        const faction = getCoalitionFaction(current);
+                        return {
+                          ...current,
+                          coalitionWon,
+                          winningFaction:
+                            coalitionWon && faction
+                              ? faction
+                              : current.participantFactions[current.winner] ?? current.winningFaction
+                        };
+                      })
+                    }
                   />
                 </div>
                 <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
@@ -370,7 +618,6 @@ export function RootDashboard({ initialData }: Props) {
                   <HistoryPanel
                     data={data}
                     seasonFilter={seasonFilter}
-                    filteredMatches={filteredMatches}
                     pending={pending}
                     isGuest={isGuest}
                     onSeasonFilterChange={setSeasonFilter}
@@ -422,6 +669,63 @@ export function RootDashboard({ initialData }: Props) {
                 onDateChange={(playedAt) => setForm((current) => ({ ...current, playedAt }))}
                 onPlayerFactionChange={handlePlayerFactionChange}
                 onToggleParticipant={toggleParticipant}
+                onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
+                onScoreChange={(player, value) =>
+                  setForm((current) => {
+                    const nextDominances = { ...current.participantDominances };
+                    delete nextDominances[player];
+                    return {
+                      ...current,
+                      participantScores: { ...current.participantScores, [player]: value },
+                      participantDominances: nextDominances
+                    };
+                  })
+                }
+                onDominanceChange={(player, card) =>
+                  setForm((current) => {
+                    const nextDominances = { ...current.participantDominances };
+                    if (card) {
+                      nextDominances[player] = card;
+                    } else {
+                      delete nextDominances[player];
+                    }
+                    const nextScores = { ...current.participantScores };
+                    if (card) delete nextScores[player];
+                    const vagabond = findVagabondPlayer(current.participants, current.participantFactions);
+                    const clearingVagabondDominance = player === vagabond && !card;
+                    return {
+                      ...current,
+                      participantDominances: nextDominances,
+                      participantScores: nextScores,
+                      coalitionPartner: clearingVagabondDominance ? "" : current.coalitionPartner,
+                      coalitionWon: clearingVagabondDominance ? false : current.coalitionWon
+                    };
+                  })
+                }
+                onCoalitionPartnerChange={(coalitionPartner) =>
+                  setForm((current) => {
+                    const next = { ...current, coalitionPartner };
+                    const faction = getCoalitionFaction(next);
+                    return {
+                      ...next,
+                      winningFaction:
+                        current.coalitionWon && faction ? faction : current.winningFaction
+                    };
+                  })
+                }
+                onCoalitionWonChange={(coalitionWon) =>
+                  setForm((current) => {
+                    const faction = getCoalitionFaction(current);
+                    return {
+                      ...current,
+                      coalitionWon,
+                      winningFaction:
+                        coalitionWon && faction
+                          ? faction
+                          : current.participantFactions[current.winner] ?? current.winningFaction
+                    };
+                  })
+                }
               />
             ) : null}
 
@@ -441,7 +745,6 @@ export function RootDashboard({ initialData }: Props) {
               <HistoryPanel
                 data={data}
                 seasonFilter={seasonFilter}
-                filteredMatches={filteredMatches}
                 pending={pending}
                 isGuest={isGuest}
                 onSeasonFilterChange={setSeasonFilter}
@@ -481,6 +784,11 @@ function RegisterPanel({
   onSubmit,
   onWinnerChange,
   onDateChange,
+  onSeasonNumberChange,
+  onScoreChange,
+  onDominanceChange,
+  onCoalitionPartnerChange,
+  onCoalitionWonChange,
   onPlayerFactionChange,
   onToggleParticipant
 }: {
@@ -489,17 +797,37 @@ function RegisterPanel({
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onWinnerChange: (winner: string) => void;
   onDateChange: (playedAt: string) => void;
+  onSeasonNumberChange: (seasonNumber: number) => void;
+  onScoreChange: (player: string, value: string) => void;
+  onDominanceChange: (player: string, card: DominanceCard | null) => void;
+  onCoalitionPartnerChange: (partner: string) => void;
+  onCoalitionWonChange: (coalitionWon: boolean) => void;
   onPlayerFactionChange: (player: string, faction: string) => void;
   onToggleParticipant: (player: string) => void;
 }) {
+  const vagabondPlayer = findVagabondPlayer(form.participants, form.participantFactions);
+  const vagabondDominance = vagabondPlayer ? form.participantDominances[vagabondPlayer] : undefined;
+  const sortedForScores = [...form.participants].sort((playerA, playerB) => {
+    const rawA = form.participantScores[playerA]?.trim();
+    const rawB = form.participantScores[playerB]?.trim();
+    const scoreA = rawA ? Number(rawA) : NaN;
+    const scoreB = rawB ? Number(rawB) : NaN;
+    const validA = rawA !== undefined && rawA !== "" && !Number.isNaN(scoreA);
+    const validB = rawB !== undefined && rawB !== "" && !Number.isNaN(scoreB);
+    if (validA && validB) return scoreB - scoreA || playerA.localeCompare(playerB);
+    if (validA) return -1;
+    if (validB) return 1;
+    return playerA.localeCompare(playerB);
+  });
+
   return (
     <form className="flex h-full flex-col gap-5 overflow-y-auto pr-1" onSubmit={onSubmit}>
       <div>
         <h2 className="storybook-title text-2xl">Registrar vitória</h2>
-        <p className="mt-1 text-sm text-bark/70">Escolham de 4 a 6 participantes, o vencedor e a facção de cada um.</p>
+        <p className="mt-1 text-sm text-bark/70">Escolham de 3 a 6 participantes, o vencedor e a facção de cada um.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <label className="space-y-2 text-sm font-semibold">
           <span>Data da partida</span>
           <input
@@ -511,11 +839,29 @@ function RegisterPanel({
         </label>
 
         <label className="space-y-2 text-sm font-semibold">
+          <span>Season</span>
+          <select
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            value={form.seasonNumber}
+            onChange={(event) => onSeasonNumberChange(Number(event.target.value))}
+          >
+            {Array.from({ length: MAX_SEASON_NUMBER - MIN_SEASON_NUMBER + 1 }, (_, index) => {
+              const seasonNumber = MIN_SEASON_NUMBER + index;
+              return (
+                <option key={seasonNumber} value={seasonNumber}>
+                  {`Season ${seasonNumber}`}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+
+        <label className="space-y-2 text-sm font-semibold">
           <span>Vencedor</span>
           <select
             className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss disabled:opacity-50"
             value={form.winner}
-            disabled={form.participants.length === 0}
+            disabled={form.participants.length === 0 || form.coalitionWon}
             onChange={(event) => onWinnerChange(event.target.value)}
           >
             {form.participants.length === 0 && (
@@ -533,8 +879,8 @@ function RegisterPanel({
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm font-semibold">Participantes</span>
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${form.participants.length >= 4 ? "bg-amberleaf/30 text-bark" : "bg-berry/15 text-berry"}`}>
-            {form.participants.length}/6 jogadores {form.participants.length < 4 ? `(mín. 4)` : ""}
+          <span className={`rounded-full px-3 py-1 text-xs font-bold ${form.participants.length >= 3 ? "bg-amberleaf/30 text-bark" : "bg-berry/15 text-berry"}`}>
+            {form.participants.length}/6 jogadores {form.participants.length < 3 ? `(mín. 3)` : ""}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -554,7 +900,7 @@ function RegisterPanel({
             );
           })}
         </div>
-        <p className="text-xs text-bark/60">Para manter a mesa válida, o app deixa marcar entre 4 e 6 jogadores.</p>
+        <p className="text-xs text-bark/60">Para manter a mesa válida, o app deixa marcar entre 3 e 6 jogadores.</p>
       </div>
 
       <div className="space-y-2">
@@ -595,9 +941,106 @@ function RegisterPanel({
         </div>
       </div>
 
+      {form.participants.length > 0 ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold">Pontos e dominâncias</span>
+            <span className="text-xs text-bark/55">Cartas disponíveis ficam com quem ativar</span>
+          </div>
+          <div className="space-y-2">
+            {sortedForScores.map((player) => {
+              const playerDominance = form.participantDominances[player] ?? null;
+              const showScore = !playerDominance;
+              const isVagabondWithDominance =
+                player === vagabondPlayer && Boolean(playerDominance);
+
+              return (
+                <div
+                  key={player}
+                  className={`flex flex-col gap-2 rounded-2xl border-2 px-3 py-2 ${
+                    isVagabondWithDominance
+                      ? "border-amberleaf/50 bg-amberleaf/10"
+                      : "border-bark/10 bg-white/50"
+                  }`}
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <span className="min-w-0 flex-1 truncate text-sm font-bold text-bark">{player}</span>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      {showScore ? (
+                        <>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            placeholder="pts"
+                            value={form.participantScores[player] ?? ""}
+                            onChange={(event) => onScoreChange(player, event.target.value)}
+                            className="w-20 rounded-xl border-2 border-bark/10 bg-white/80 px-3 py-2 text-center text-sm font-bold outline-none transition focus:border-moss"
+                          />
+                          <span className="text-xs font-semibold text-bark/40">ou</span>
+                        </>
+                      ) : (
+                        <span className="rounded-full bg-moss/15 px-2 py-1 text-xs font-bold text-moss">
+                          Dominância: {playerDominance}
+                        </span>
+                      )}
+                      <PlayerDominanceSelect
+                        value={playerDominance}
+                        availableCards={getAvailableDominanceCards(form.participantDominances, player)}
+                        onChange={(card) => onDominanceChange(player, card)}
+                      />
+                    </div>
+                  </div>
+
+                  {isVagabondWithDominance ? (
+                    <div className="flex flex-col gap-2 border-t border-amberleaf/30 pt-2 sm:flex-row sm:items-center sm:justify-between">
+                      <label className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-bark">
+                        <span className="shrink-0">Parceiro</span>
+                        <select
+                          className="min-w-0 flex-1 rounded-xl border-2 border-bark/10 bg-white/80 px-3 py-2 text-sm font-bold outline-none transition focus:border-moss"
+                          value={form.coalitionPartner}
+                          onChange={(event) => onCoalitionPartnerChange(event.target.value)}
+                        >
+                          <option value="">Escolher jogador</option>
+                          {form.participants
+                            .filter((p) => p !== vagabondPlayer)
+                            .map((p) => (
+                              <option key={p} value={p}>
+                                {p}
+                                {form.participantFactions[p]
+                                  ? ` · ${form.participantFactions[p]}`
+                                  : ""}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs font-semibold text-bark">
+                        <input
+                          type="checkbox"
+                          checked={form.coalitionWon}
+                          onChange={(event) => onCoalitionWonChange(event.target.checked)}
+                          className="h-4 w-4 accent-moss"
+                        />
+                        Coalizão venceu
+                      </label>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          {!form.coalitionWon && !form.participantDominances[form.winner] ? (
+            <p className="text-xs text-bark/55">
+              Vitória por pontos: ninguém pode ter mais pontos que o vencedor. Parceiro da coalizão pode chegar a 30.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       <button
         type="submit"
-        disabled={pending || form.participants.length < 4}
+        disabled={pending || form.participants.length < 3}
         className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-berry px-4 py-3 font-bold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-70"
       >
         {pending ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Trophy className="h-5 w-5" />}
@@ -620,7 +1063,14 @@ function LeaderboardPanel({
   seasonFilter: string;
   factionFilter: string;
   leaderboard: Array<{ player: string; wins: number; factionWins: [string, number][]; winrate: number | null; matchesPlayed: number }>;
-  classLeaders: Array<{ faction: string; leader: string; wins: number; matchesPlayed: number; winrate: number | null }>;
+  classLeaders: Array<{
+    faction: string;
+    leaders: string[];
+    wins: number;
+    matchesPlayed: number;
+    winrate: number | null;
+    isTie: boolean;
+  }>;
   onSeasonFilterChange: (value: string) => void;
   onFactionFilterChange: (value: string) => void;
 }) {
@@ -734,9 +1184,20 @@ function LeaderboardPanel({
                 <div className="flex items-center gap-3">
                   <FactionBadge faction={entry.faction} iconOnly size="lg" />
                   <div className="text-sm font-semibold text-bark">
-                    {entry.wins > 0
-                      ? <><span className="font-bold">{entry.leader}</span> · {entry.wins} vitória{entry.wins !== 1 ? "s" : ""} em {entry.matchesPlayed} partida{entry.matchesPlayed !== 1 ? "s" : ""}</>
-                      : <span className="text-bark/50">Ninguém ainda</span>}
+                    {entry.leaders.length > 0 ? (
+                      <>
+                        <span className="font-bold">
+                          {formatFactionLeaders(entry.leaders, entry.isTie)}
+                        </span>
+                        {" · "}
+                        {entry.wins} vitória{entry.wins !== 1 ? "s" : ""}
+                        {!entry.isTie
+                          ? ` em ${entry.matchesPlayed} partida${entry.matchesPlayed !== 1 ? "s" : ""}`
+                          : null}
+                      </>
+                    ) : (
+                      <span className="text-bark/50">Ninguém ainda</span>
+                    )}
                   </div>
                 </div>
                 {entry.winrate !== null && (
@@ -756,7 +1217,6 @@ function LeaderboardPanel({
 function HistoryPanel({
   data,
   seasonFilter,
-  filteredMatches,
   pending,
   isGuest,
   onSeasonFilterChange,
@@ -764,48 +1224,97 @@ function HistoryPanel({
 }: {
   data: DashboardData;
   seasonFilter: string;
-  filteredMatches: MatchRecord[];
   pending: boolean;
   isGuest: boolean;
   onSeasonFilterChange: (value: string) => void;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const [playerFilter, setPlayerFilter] = useState("all");
+  const [coalitionFilter, setCoalitionFilter] = useState<"all" | "coalition" | "coalition_win" | "no_coalition">("all");
+
+  const historyMatches = useMemo(() => {
+    return data.matches.filter((match) => {
+      if (seasonFilter !== "all" && match.seasonLabel !== seasonFilter) return false;
+
+      if (playerFilter !== "all" && !getVictoryRecipients(match).includes(playerFilter)) {
+        return false;
+      }
+
+      if (coalitionFilter === "coalition" && !hasVagabondCoalition(match)) return false;
+      if (coalitionFilter === "coalition_win" && !isCoalitionVictory(match)) return false;
+      if (coalitionFilter === "no_coalition" && (hasVagabondCoalition(match) || isCoalitionVictory(match))) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [data.matches, seasonFilter, playerFilter, coalitionFilter]);
+
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="storybook-title text-2xl">Histórico de partidas</h2>
           <p className="mt-1 text-sm text-bark/70">Tudo fica aberto para o grupo adicionar ou apagar registros.</p>
         </div>
-        <div className="flex flex-col gap-2 sm:items-end">
-          <label className="space-y-1 text-sm font-semibold">
-            <span>Filtrar por season</span>
-            <select
-              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-52"
-              value={seasonFilter}
-              onChange={(event) => onSeasonFilterChange(event.target.value)}
-            >
-              {data.seasons.map((season) => (
-                <option key={season.value} value={season.value}>
-                  {season.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() => exportMatchesToExcel(data.matches)}
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-moss/30 bg-moss/10 px-4 py-2.5 text-sm font-bold text-moss transition hover:bg-moss/20"
+        <button
+          type="button"
+          onClick={() => exportMatchesToExcel(data.matches)}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border-2 border-moss/30 bg-moss/10 px-4 py-2.5 text-sm font-bold text-moss transition hover:bg-moss/20"
+        >
+          <Download className="h-4 w-4" />
+          Exportar Excel
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="space-y-1 text-sm font-semibold">
+          <span>Season</span>
+          <select
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            value={seasonFilter}
+            onChange={(event) => onSeasonFilterChange(event.target.value)}
           >
-            <Download className="h-4 w-4" />
-            Exportar Excel
-          </button>
-        </div>
+            {data.seasons.map((season) => (
+              <option key={season.value} value={season.value}>
+                {season.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-semibold">
+          <span>Vencedor</span>
+          <select
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            value={playerFilter}
+            onChange={(event) => setPlayerFilter(event.target.value)}
+          >
+            <option value="all">Todos</option>
+            {PLAYERS.map((player) => (
+              <option key={player} value={player}>
+                {player}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-semibold">
+          <span>Coalizão</span>
+          <select
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            value={coalitionFilter}
+            onChange={(event) => setCoalitionFilter(event.target.value as typeof coalitionFilter)}
+          >
+            <option value="all">Todas</option>
+            <option value="coalition">Com coalizão</option>
+            <option value="coalition_win">Vitória da coalizão</option>
+            <option value="no_coalition">Sem coalizão</option>
+          </select>
+        </label>
       </div>
 
       <div className="grid gap-3">
-        {filteredMatches.length > 0 ? (
-          filteredMatches.map((match) => <HistoryCard key={match.id} match={match} onDelete={onDelete} pending={pending} isGuest={isGuest} />)
+        {historyMatches.length > 0 ? (
+          historyMatches.map((match) => <HistoryCard key={match.id} match={match} onDelete={onDelete} pending={pending} isGuest={isGuest} />)
         ) : (
           <div className="rounded-[24px] border-2 border-dashed border-bark/15 bg-white/45 p-8 text-center text-sm text-bark/60">
             Nenhuma partida registrada nesse filtro ainda.
@@ -847,7 +1356,7 @@ function SeasonPanel({
         <div>
           <h2 className="storybook-title text-2xl">Seasons</h2>
           <p className="mt-1 text-sm text-bark/70">
-            Escolham manualmente qual season está valendo agora. Toda nova partida entra nela.
+            Escolham qual season está valendo agora. Use <strong>Season 0</strong> só para cadastrar partidas antigas (antes do app). Na aba de registro você também pode escolher a season de cada partida.
           </p>
         </div>
         <span className="rounded-full bg-moss px-6 py-2 text-sm font-bold uppercase tracking-[0.18em] text-cream whitespace-nowrap">
@@ -863,11 +1372,14 @@ function SeasonPanel({
             value={currentSeasonNumber}
             onChange={(event) => onSeasonNumberChange(Number(event.target.value))}
           >
-            {Array.from({ length: 12 }, (_, index) => (
-              <option key={index + 1} value={index + 1}>
-                {`Season ${index + 1}`}
-              </option>
-            ))}
+            {Array.from({ length: MAX_SEASON_NUMBER - MIN_SEASON_NUMBER + 1 }, (_, index) => {
+              const seasonNumber = MIN_SEASON_NUMBER + index;
+              return (
+                <option key={seasonNumber} value={seasonNumber}>
+                  {`Season ${seasonNumber}`}
+                </option>
+              );
+            })}
           </select>
         </label>
         <button
@@ -881,6 +1393,11 @@ function SeasonPanel({
       </form>
     </section>
   );
+}
+
+function formatFactionLeaders(leaders: string[], isTie: boolean) {
+  const names = leaders.join(", ");
+  return isTie ? `${names} (empate)` : names;
 }
 
 function formatDisplayDate(value: string) {
@@ -977,6 +1494,23 @@ function TabButton({
   );
 }
 
+function MatchFactionsDisplay({ match }: { match: MatchRecord }) {
+  const winningFactions = getWinningFactions(match);
+  const factions = sortFactionsForDisplay(getFactionsInPlay(match), winningFactions);
+  const winners = new Set(winningFactions);
+
+  return (
+    <div className="space-y-2">
+      <span className="text-xs font-bold uppercase tracking-[0.14em] text-bark/50">Facções na mesa</span>
+      <div className="flex flex-wrap gap-2">
+        {factions.map((faction) => (
+          <FactionBadge key={`${match.id}-${faction}`} faction={faction} winner={winners.has(faction)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HistoryCard({
   match,
   onDelete,
@@ -1000,9 +1534,30 @@ function HistoryCard({
           </div>
           <div>
             <h3 className="text-xl font-bold text-bark">{match.winner}</h3>
-            <p className="mt-1 text-sm text-bark/70">venceu contra {match.participants.filter((name) => name !== match.winner).join(", ")}</p>
+            <p className="mt-1 text-sm text-bark/70">
+              venceu contra {getMatchOpponents(match).join(", ")}
+            </p>
+            {getWinnerDominanceCard(match) ? (
+              <p className="mt-1 text-xs font-semibold text-bark/60">
+                Dominância: {getWinnerDominanceCard(match)}
+              </p>
+            ) : null}
+            {formatParticipantDominances(match) ? (
+              <p className="mt-1 text-xs text-bark/55">{formatParticipantDominances(match)}</p>
+            ) : null}
+            {getSortedScores(match).length > 0 ? (
+              <p className="mt-2 text-xs text-bark/65">
+                Pontos:{" "}
+                {getSortedScores(match)
+                  .map((entry) => `${entry.player} ${entry.score}`)
+                  .join(" · ")}
+              </p>
+            ) : null}
           </div>
-          <FactionBadge faction={match.winningFaction} />
+          <MatchFactionsDisplay match={match} />
+          {match.vagabondCoalition && !match.coalitionWinners?.length ? (
+            <p className="text-xs text-bark/55">{formatVagabondCoalitionNote(match.vagabondCoalition)}</p>
+          ) : null}
         </div>
         {!isGuest && <button
           type="button"

@@ -36,3 +36,6 @@ export const FACTION_STYLES: Record<(typeof FACTIONS)[number], { bg: string; acc
 };
 
 export const FACTION_FILTERS = ["all", ...FACTIONS] as const;
+
+export const DOMINANCE_CARDS = ["Coelho", "Raposa", "Rato", "Pássaro"] as const;
+export type DominanceCard = (typeof DOMINANCE_CARDS)[number];

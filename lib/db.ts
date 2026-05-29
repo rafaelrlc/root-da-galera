@@ -1,5 +1,8 @@
 import { neon } from "@neondatabase/serverless";
-import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
+import type { DominanceCard } from "@/lib/constants";
+import { DOMINANCE_CARDS } from "@/lib/constants";
+import { isValidSeasonNumber, listSeasonOptions, seasonLabel } from "@/lib/seasons";
+import type { ActivityLog, DashboardData, MatchRecord, VagabondCoalition } from "@/lib/types";
 
 function getSql() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -55,6 +58,36 @@ export async function ensureSchema() {
   `;
 
   await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS participant_scores JSON;
+  `;
+
+  await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS won_by_dominance BOOLEAN NOT NULL DEFAULT FALSE;
+  `;
+
+  await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS dominance_card TEXT;
+  `;
+
+  await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS coalition_winners JSON;
+  `;
+
+  await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS participant_dominances JSON;
+  `;
+
+  await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS vagabond_coalition JSON;
+  `;
+
+  await sql`
     INSERT INTO app_settings (key, value)
     VALUES ('current_season', '1')
     ON CONFLICT (key) DO NOTHING;
@@ -72,7 +105,7 @@ export async function getCurrentSeasonNumber() {
   `) as Array<{ value: string }>;
 
   const parsedValue = Number(result[0]?.value ?? "1");
-  return Number.isInteger(parsedValue) && parsedValue >= 1 && parsedValue <= 12 ? parsedValue : 1;
+  return isValidSeasonNumber(parsedValue) ? parsedValue : 1;
 }
 
 export async function updateCurrentSeasonNumber(seasonNumber: number) {
@@ -90,7 +123,22 @@ export async function listMatches(): Promise<MatchRecord[]> {
   await ensureSchema();
   const sql = getSql();
   const result = (await sql`
-    SELECT id, winner, participants, participant_factions, winning_faction, played_at, season_label, season_number, created_at
+    SELECT
+      id,
+      winner,
+      participants,
+      participant_factions,
+      participant_scores,
+      participant_dominances,
+      vagabond_coalition,
+      winning_faction,
+      won_by_dominance,
+      dominance_card,
+      coalition_winners,
+      played_at,
+      season_label,
+      season_number,
+      created_at
     FROM matches
     ORDER BY played_at DESC, created_at DESC;
   `) as Array<{
@@ -98,7 +146,13 @@ export async function listMatches(): Promise<MatchRecord[]> {
     winner: string;
     participants: string | string[];
     participant_factions: string | Record<string, string | null> | null;
+    participant_scores: string | Record<string, number> | null;
+    participant_dominances: string | Record<string, DominanceCard> | null;
+    vagabond_coalition: string | VagabondCoalition | null;
     winning_faction: string;
+    won_by_dominance: boolean;
+    dominance_card: string | null;
+    coalition_winners: string | string[] | null;
     played_at: string;
     season_label: string;
     season_number: number;
@@ -115,16 +169,78 @@ export async function listMatches(): Promise<MatchRecord[]> {
         : JSON.parse(row.participant_factions);
 
     const participantFactions = participants.reduce<Record<string, string | null>>((acc, player) => {
-      acc[player] = parsedFactions[player] ?? (player === row.winner ? row.winning_faction : null);
+      acc[player] = parsedFactions[player] ?? null;
       return acc;
     }, {});
+
+    const parsedScores =
+      row.participant_scores == null
+        ? null
+        : typeof row.participant_scores === "object"
+        ? (row.participant_scores as Record<string, number>)
+        : (JSON.parse(row.participant_scores) as Record<string, number>);
+
+    const coalitionWinners =
+      row.coalition_winners == null
+        ? null
+        : Array.isArray(row.coalition_winners)
+        ? row.coalition_winners
+        : (JSON.parse(row.coalition_winners) as string[]);
+
+    const parsedDominances =
+      row.participant_dominances == null
+        ? null
+        : typeof row.participant_dominances === "object"
+        ? (row.participant_dominances as Record<string, DominanceCard>)
+        : (JSON.parse(row.participant_dominances) as Record<string, DominanceCard>);
+
+    const dominanceCard =
+      row.dominance_card && DOMINANCE_CARDS.includes(row.dominance_card as DominanceCard)
+        ? (row.dominance_card as DominanceCard)
+        : null;
+
+    let participantDominances = parsedDominances;
+    if (!participantDominances && dominanceCard) {
+      if (coalitionWinners?.length) {
+        const vagabond = coalitionWinners.find((player) => participantFactions[player] === "Vagabond");
+        if (vagabond) participantDominances = { [vagabond]: dominanceCard };
+      } else if (!row.winner.startsWith("COALIZÃO")) {
+        participantDominances = { [row.winner]: dominanceCard };
+      }
+    }
+
+    const parsedVagabondCoalition =
+      row.vagabond_coalition == null
+        ? null
+        : typeof row.vagabond_coalition === "object"
+        ? (row.vagabond_coalition as VagabondCoalition)
+        : (JSON.parse(row.vagabond_coalition) as VagabondCoalition);
+
+    let vagabondCoalition = parsedVagabondCoalition;
+    if (!vagabondCoalition && coalitionWinners?.length === 2) {
+      const vagabond = coalitionWinners.find((player) => participantFactions[player] === "Vagabond");
+      const partner = coalitionWinners.find((player) => player !== vagabond);
+      if (vagabond && partner) {
+        vagabondCoalition = {
+          vagabond,
+          partner,
+          faction: row.winning_faction
+        };
+      }
+    }
 
     return {
       id: row.id,
       winner: row.winner,
       participants,
       participantFactions,
+      participantScores: parsedScores,
+      participantDominances,
+      vagabondCoalition,
       winningFaction: row.winning_faction,
+      wonByDominance: Boolean(row.won_by_dominance),
+      dominanceCard,
+      coalitionWinners: coalitionWinners?.length ? coalitionWinners : null,
       playedAt: row.played_at,
       seasonLabel: row.season_label,
       seasonNumber: row.season_number,
@@ -172,7 +288,13 @@ export async function createMatch(input: {
   winner: string;
   participants: string[];
   participantFactions: Record<string, string>;
+  participantScores?: Record<string, number> | null;
+  participantDominances?: Record<string, DominanceCard> | null;
   winningFaction: string;
+  wonByDominance?: boolean;
+  dominanceCard?: DominanceCard | null;
+  vagabondCoalition?: VagabondCoalition | null;
+  coalitionWinners?: string[] | null;
   playedAt: string;
   seasonNumber: number;
   actorName: string;
@@ -180,28 +302,61 @@ export async function createMatch(input: {
   await ensureSchema();
   const sql = getSql();
   const id = crypto.randomUUID();
-  const seasonLabel = `Season ${input.seasonNumber}`;
+  const matchSeasonLabel = seasonLabel(input.seasonNumber);
+
+  const participantScores =
+    input.participantScores && Object.keys(input.participantScores).length > 0
+      ? JSON.stringify(input.participantScores)
+      : null;
+
+  const participantDominances =
+    input.participantDominances && Object.keys(input.participantDominances).length > 0
+      ? JSON.stringify(input.participantDominances)
+      : null;
+
+  const vagabondCoalition = input.vagabondCoalition ? JSON.stringify(input.vagabondCoalition) : null;
 
   await sql`
     INSERT INTO matches (
-      id, winner, participants, participant_factions, winning_faction, played_at, season_label, season_number
+      id,
+      winner,
+      participants,
+      participant_factions,
+      participant_scores,
+      participant_dominances,
+      vagabond_coalition,
+      winning_faction,
+      won_by_dominance,
+      dominance_card,
+      coalition_winners,
+      played_at,
+      season_label,
+      season_number
     ) VALUES (
       ${id},
       ${input.winner},
       ${JSON.stringify(input.participants)},
       ${JSON.stringify(input.participantFactions)},
+      ${participantScores},
+      ${participantDominances},
+      ${vagabondCoalition},
       ${input.winningFaction},
+      ${Boolean(input.wonByDominance)},
+      ${input.dominanceCard ?? null},
+      ${input.coalitionWinners?.length ? JSON.stringify(input.coalitionWinners) : null},
       ${input.playedAt},
-      ${seasonLabel},
+      ${matchSeasonLabel},
       ${input.seasonNumber}
     );
   `;
 
-  const opponents = input.participants.filter((player) => player !== input.winner).join(", ");
+  const winners = new Set(input.coalitionWinners ?? [input.winner]);
+  const opponents = input.participants.filter((player) => !winners.has(player)).join(", ");
+  const dominanceSuffix = input.wonByDominance && input.dominanceCard ? ` via dominância (${input.dominanceCard})` : "";
   await createLog(
     "CREATE_MATCH",
     input.actorName,
-    `${input.winner} venceu com ${input.winningFaction} contra ${opponents} em ${input.playedAt} (${seasonLabel})`
+    `${input.winner} venceu com ${input.winningFaction}${dominanceSuffix} contra ${opponents} em ${input.playedAt} (${matchSeasonLabel})`
   );
 }
 
@@ -209,7 +364,7 @@ export async function deleteMatch(id: string, actorName: string) {
   await ensureSchema();
   const sql = getSql();
   const matchResult = (await sql`
-    SELECT winner, participants, participant_factions, winning_faction, played_at, season_label
+    SELECT winner, participants, participant_factions, winning_faction, coalition_winners, dominance_card, won_by_dominance, played_at, season_label
     FROM matches
     WHERE id = ${id}
     LIMIT 1;
@@ -218,6 +373,9 @@ export async function deleteMatch(id: string, actorName: string) {
     participants: string | string[];
     participant_factions: string | Record<string, string | null> | null;
     winning_faction: string;
+    coalition_winners: string | string[] | null;
+    dominance_card: string | null;
+    won_by_dominance: boolean;
     played_at: string;
     season_label: string;
   }>;
@@ -231,11 +389,19 @@ export async function deleteMatch(id: string, actorName: string) {
 
   if (match) {
     const participants = Array.isArray(match.participants) ? match.participants : JSON.parse(match.participants);
-    const opponents = participants.filter((player: string) => player !== match.winner).join(", ");
+    const coalitionWinners =
+      match.coalition_winners == null
+        ? null
+        : Array.isArray(match.coalition_winners)
+        ? match.coalition_winners
+        : (JSON.parse(match.coalition_winners) as string[]);
+    const winners = new Set(coalitionWinners?.length ? coalitionWinners : [match.winner]);
+    const opponents = participants.filter((player: string) => !winners.has(player)).join(", ");
+    const dominanceSuffix = match.won_by_dominance && match.dominance_card ? ` via dominância (${match.dominance_card})` : "";
     await createLog(
       "DELETE_MATCH",
       actorName,
-      `Registro apagado: ${match.winner} com ${match.winning_faction} contra ${opponents} em ${match.played_at} (${match.season_label})`
+      `Registro apagado: ${match.winner} com ${match.winning_faction}${dominanceSuffix} contra ${opponents} em ${match.played_at} (${match.season_label})`
     );
   }
 }
@@ -244,19 +410,13 @@ export async function getDashboardData(currentUser: string, isGuest = false): Pr
   const currentSeasonNumber = await getCurrentSeasonNumber();
   const matches = await listMatches();
   const logs = await listLogs();
-  const allSeasons = Array.from({ length: 12 }, (_, index) => {
-    const seasonNumber = index + 1;
-    const label = `Season ${seasonNumber}`;
-    return { label, value: label };
-  });
-
   return {
     matches,
     logs,
-    seasons: [{ label: "All time", value: "all" }, ...allSeasons],
+    seasons: [{ label: "All time", value: "all" }, ...listSeasonOptions()],
     meta: {
       currentSeasonNumber,
-      currentSeasonLabel: `Season ${currentSeasonNumber}`,
+      currentSeasonLabel: seasonLabel(currentSeasonNumber),
       isGuest,
       currentUser
     }

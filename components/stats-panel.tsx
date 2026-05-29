@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import type { DashboardData } from "@/lib/types";
 import { FACTIONS, PLAYERS } from "@/lib/constants";
+import { getVictoryRecipients } from "@/lib/match-utils";
 
 const PLAYER_COLORS: Record<string, string> = {
   Rafinha:  "#4e6a35",
@@ -67,7 +68,11 @@ export function StatsPanel({ data }: { data: DashboardData }) {
   // ── 1. Vitórias por jogador ───────────────────────────────────────────────
   const winsByPlayer = useMemo(() => {
     const map = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
-    matches.forEach((m) => map.set(m.winner, (map.get(m.winner) ?? 0) + 1));
+    matches.forEach((m) => {
+      getVictoryRecipients(m).forEach((player) => {
+        map.set(player, (map.get(player) ?? 0) + 1);
+      });
+    });
     return [...map.entries()]
       .map(([name, wins]) => ({ name, wins }))
       .filter((e) => e.wins > 0)
@@ -90,7 +95,9 @@ export function StatsPanel({ data }: { data: DashboardData }) {
     const wins   = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
     matches.forEach((m) => {
       m.participants.forEach((p) => played.set(p, (played.get(p) ?? 0) + 1));
-      wins.set(m.winner, (wins.get(m.winner) ?? 0) + 1);
+      getVictoryRecipients(m).forEach((player) => {
+        wins.set(player, (wins.get(player) ?? 0) + 1);
+      });
     });
     return PLAYERS
       .map((p) => ({
@@ -114,7 +121,9 @@ export function StatsPanel({ data }: { data: DashboardData }) {
     sorted.forEach((m) => {
       const date = new Date(m.playedAt);
       const month = `${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-      cumulative.set(m.winner, (cumulative.get(m.winner) ?? 0) + 1);
+      getVictoryRecipients(m).forEach((player) => {
+        cumulative.set(player, (cumulative.get(player) ?? 0) + 1);
+      });
       byMonth[month] = Object.fromEntries(cumulative);
     });
 
@@ -123,7 +132,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
 
   // Players who have at least one win in filtered matches
   const activePlayers = useMemo(
-    () => PLAYERS.filter((p) => matches.some((m) => m.winner === p || m.participants.includes(p))),
+    () => PLAYERS.filter((p) => matches.some((m) => getVictoryRecipients(m).includes(p) || m.participants.includes(p))),
     [matches]
   );
 
