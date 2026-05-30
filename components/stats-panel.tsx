@@ -9,6 +9,7 @@ import {
 import type { DashboardData } from "@/lib/types";
 import { FACTIONS, PLAYERS } from "@/lib/constants";
 import { getVictoryRecipients } from "@/lib/match-utils";
+import { matchesVenueFilter, type MatchVenueFilter } from "@/lib/match-venue";
 
 const PLAYER_COLORS: Record<string, string> = {
   Rafinha:  "#4e6a35",
@@ -59,10 +60,14 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 
 export function StatsPanel({ data }: { data: DashboardData }) {
   const [seasonFilter, setSeasonFilter] = useState("all");
+  const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
 
   const matches = useMemo(
-    () => data.matches.filter((m) => seasonFilter === "all" || m.seasonLabel === seasonFilter),
-    [data.matches, seasonFilter]
+    () =>
+      data.matches.filter(
+        (m) => (seasonFilter === "all" || m.seasonLabel === seasonFilter) && matchesVenueFilter(m, venueFilter)
+      ),
+    [data.matches, seasonFilter, venueFilter]
   );
 
   // ── 1. Vitórias por jogador ───────────────────────────────────────────────
@@ -157,18 +162,32 @@ export function StatsPanel({ data }: { data: DashboardData }) {
           <h2 className="storybook-title text-2xl">Estatísticas</h2>
           <p className="mt-1 text-sm text-bark/70">Gráficos e análises das partidas registradas.</p>
         </div>
-        <label className="space-y-1 text-sm font-semibold">
-          <span>Season</span>
-          <select
-            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-44"
-            value={seasonFilter}
-            onChange={(e) => setSeasonFilter(e.target.value)}
-          >
-            {data.seasons.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-        </label>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <label className="space-y-1 text-sm font-semibold">
+            <span>Season</span>
+            <select
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-44"
+              value={seasonFilter}
+              onChange={(e) => setSeasonFilter(e.target.value)}
+            >
+              {data.seasons.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold">
+            <span>Modalidade</span>
+            <select
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-44"
+              value={venueFilter}
+              onChange={(e) => setVenueFilter(e.target.value as MatchVenueFilter)}
+            >
+              <option value="all">Todas</option>
+              <option value="online">Online</option>
+              <option value="presencial">Presencial</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">

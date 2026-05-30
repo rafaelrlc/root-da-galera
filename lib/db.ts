@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import type { DominanceCard } from "@/lib/constants";
 import { DOMINANCE_CARDS } from "@/lib/constants";
 import { isValidSeasonNumber, listSeasonOptions, seasonLabel } from "@/lib/seasons";
+import { DEFAULT_MATCH_VENUE, normalizeMatchVenue, type MatchVenue } from "@/lib/match-venue";
 import type { ActivityLog, DashboardData, MatchRecord, VagabondCoalition } from "@/lib/types";
 
 function getSql() {
@@ -88,6 +89,19 @@ export async function ensureSchema() {
   `;
 
   await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS venue TEXT NOT NULL DEFAULT 'online';
+  `;
+
+  await sql`
+    UPDATE matches
+    SET venue = ${DEFAULT_MATCH_VENUE}
+    WHERE venue IS NULL
+      OR TRIM(venue) = ''
+      OR venue NOT IN ('online', 'presencial');
+  `;
+
+  await sql`
     INSERT INTO app_settings (key, value)
     VALUES ('current_season', '1')
     ON CONFLICT (key) DO NOTHING;
@@ -138,6 +152,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
       played_at,
       season_label,
       season_number,
+      venue,
       created_at
     FROM matches
     ORDER BY played_at DESC, created_at DESC;
@@ -156,6 +171,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
     played_at: string;
     season_label: string;
     season_number: number;
+    venue: string | null;
     created_at: string;
   }>;
 
@@ -244,6 +260,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
       playedAt: row.played_at,
       seasonLabel: row.season_label,
       seasonNumber: row.season_number,
+      venue: normalizeMatchVenue(row.venue),
       createdAt: row.created_at
     };
   });
@@ -297,6 +314,7 @@ export async function createMatch(input: {
   coalitionWinners?: string[] | null;
   playedAt: string;
   seasonNumber: number;
+  venue: MatchVenue;
   actorName: string;
 }) {
   await ensureSchema();
@@ -331,7 +349,8 @@ export async function createMatch(input: {
       coalition_winners,
       played_at,
       season_label,
-      season_number
+      season_number,
+      venue
     ) VALUES (
       ${id},
       ${input.winner},
@@ -346,7 +365,8 @@ export async function createMatch(input: {
       ${input.coalitionWinners?.length ? JSON.stringify(input.coalitionWinners) : null},
       ${input.playedAt},
       ${matchSeasonLabel},
-      ${input.seasonNumber}
+      ${input.seasonNumber},
+      ${input.venue}
     );
   `;
 
@@ -356,7 +376,7 @@ export async function createMatch(input: {
   await createLog(
     "CREATE_MATCH",
     input.actorName,
-    `${input.winner} venceu com ${input.winningFaction}${dominanceSuffix} contra ${opponents} em ${input.playedAt} (${matchSeasonLabel})`
+    `${input.winner} venceu com ${input.winningFaction}${dominanceSuffix} contra ${opponents} em ${input.playedAt} (${matchSeasonLabel}, ${input.venue === "online" ? "online" : "presencial"})`
   );
 }
 
