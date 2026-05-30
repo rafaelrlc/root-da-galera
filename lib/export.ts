@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { getMatchOpponents, getSortedScores, getVictoryRecipients } from "@/lib/match-utils";
+import { formatMatchVenue } from "@/lib/match-venue";
 import type { MatchRecord } from "@/lib/types";
 
 function formatDate(value: string): string {
@@ -19,6 +20,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
     "#",
     "Data",
     "Season",
+    "Modalidade",
     "Vencedor",
     "Facção vencedora",
     "Dominância",
@@ -42,6 +44,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
       index + 1,
       formatDate(match.playedAt),
       match.seasonLabel,
+      formatMatchVenue(match.venue),
       match.winner,
       match.winningFaction,
       match.wonByDominance ? "Sim" : "Não",
@@ -57,6 +60,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
   // Column widths
   matchSheet["!cols"] = [
     { wch: 4 },
+    { wch: 12 },
     { wch: 12 },
     { wch: 12 },
     { wch: 28 },

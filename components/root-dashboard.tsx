@@ -21,6 +21,14 @@ import {
   isCoalitionVictory,
   sortFactionsForDisplay
 } from "@/lib/match-utils";
+import {
+  DEFAULT_MATCH_VENUE,
+  formatMatchVenue,
+  MATCH_VENUES,
+  matchesVenueFilter,
+  type MatchVenue,
+  type MatchVenueFilter
+} from "@/lib/match-venue";
 import { MAX_SEASON_NUMBER, MIN_SEASON_NUMBER } from "@/lib/seasons";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
@@ -39,6 +47,7 @@ type FormState = {
   winningFaction: string;
   playedAt: string;
   seasonNumber: number;
+  venue: MatchVenue;
   coalitionPartner: string;
   coalitionWon: boolean;
 };
@@ -53,6 +62,7 @@ function createEmptyForm(seasonNumber: number): FormState {
     winningFaction: FACTIONS[0],
     playedAt: new Date().toISOString().slice(0, 10),
     seasonNumber,
+    venue: DEFAULT_MATCH_VENUE,
     coalitionPartner: "",
     coalitionWon: false
   };
@@ -109,7 +119,8 @@ function buildMatchPayload(form: FormState) {
       coalitionWon: true,
       dominanceCard: participantDominances[vagabondCoalition.vagabond],
       playedAt: form.playedAt,
-      seasonNumber: form.seasonNumber
+      seasonNumber: form.seasonNumber,
+      venue: form.venue
     };
   }
 
@@ -127,7 +138,8 @@ function buildMatchPayload(form: FormState) {
     coalitionWon: false,
     dominanceCard: winnerDominance ?? null,
     playedAt: form.playedAt,
-    seasonNumber: form.seasonNumber
+    seasonNumber: form.seasonNumber,
+    venue: form.venue
   };
 }
 
@@ -167,6 +179,7 @@ export function RootDashboard({ initialData }: Props) {
   const isGuest = data.meta.isGuest;
   const [seasonFilter, setSeasonFilter] = useState("all");
   const [factionFilter, setFactionFilter] = useState<(typeof FACTION_FILTERS)[number]>("all");
+  const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
   const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats">(
     initialData.meta.isGuest ? "leaderboard" : "register"
   );
@@ -190,9 +203,10 @@ export function RootDashboard({ initialData }: Props) {
     return data.matches.filter((match) => {
       const seasonMatches = seasonFilter === "all" || match.seasonLabel === seasonFilter;
       const factionMatches = factionFilter === "all" || match.winningFaction === factionFilter;
-      return seasonMatches && factionMatches;
+      const venueMatches = matchesVenueFilter(match, venueFilter);
+      return seasonMatches && factionMatches && venueMatches;
     });
-  }, [data.matches, seasonFilter, factionFilter]);
+  }, [data.matches, seasonFilter, factionFilter, venueFilter]);
 
   const leaderboard = useMemo(() => {
     const totals = new Map<string, number>();
@@ -208,7 +222,8 @@ export function RootDashboard({ initialData }: Props) {
     });
 
     const seasonMatches = data.matches.filter(
-      (match) => seasonFilter === "all" || match.seasonLabel === seasonFilter
+      (match) =>
+        (seasonFilter === "all" || match.seasonLabel === seasonFilter) && matchesVenueFilter(match, venueFilter)
     );
 
     filteredMatches.forEach((match) => {
@@ -254,11 +269,12 @@ export function RootDashboard({ initialData }: Props) {
         };
       })
       .sort((a, b) => b.wins - a.wins || a.player.localeCompare(b.player));
-  }, [filteredMatches, data.matches, seasonFilter, factionFilter]);
+  }, [filteredMatches, data.matches, seasonFilter, factionFilter, venueFilter]);
 
   const classLeaders = useMemo(() => {
     const seasonMatches = data.matches.filter(
-      (match) => seasonFilter === "all" || match.seasonLabel === seasonFilter
+      (match) =>
+        (seasonFilter === "all" || match.seasonLabel === seasonFilter) && matchesVenueFilter(match, venueFilter)
     );
 
     return FACTIONS.map((faction) => {
@@ -300,7 +316,7 @@ export function RootDashboard({ initialData }: Props) {
         isTie: leaders.length > 1
       };
     });
-  }, [data.matches, seasonFilter]);
+  }, [data.matches, seasonFilter, venueFilter]);
 
   function toggleParticipant(player: string) {
     setForm((current) => {
@@ -526,6 +542,7 @@ export function RootDashboard({ initialData }: Props) {
                     onPlayerFactionChange={handlePlayerFactionChange}
                     onToggleParticipant={toggleParticipant}
                     onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
+                    onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
                     onScoreChange={(player, value) =>
                       setForm((current) => {
                         const nextDominances = { ...current.participantDominances };
@@ -589,10 +606,12 @@ export function RootDashboard({ initialData }: Props) {
                     data={data}
                     seasonFilter={seasonFilter}
                     factionFilter={factionFilter}
+                    venueFilter={venueFilter}
                     leaderboard={leaderboard}
                     classLeaders={classLeaders}
                     onSeasonFilterChange={setSeasonFilter}
                     onFactionFilterChange={(value) => setFactionFilter(value as (typeof FACTION_FILTERS)[number])}
+                    onVenueFilterChange={setVenueFilter}
                   />
                 </div>
               </div>
@@ -604,10 +623,12 @@ export function RootDashboard({ initialData }: Props) {
                   data={data}
                   seasonFilter={seasonFilter}
                   factionFilter={factionFilter}
+                  venueFilter={venueFilter}
                   leaderboard={leaderboard}
                   classLeaders={classLeaders}
                   onSeasonFilterChange={setSeasonFilter}
                   onFactionFilterChange={(value) => setFactionFilter(value as (typeof FACTION_FILTERS)[number])}
+                  onVenueFilterChange={setVenueFilter}
                 />
               </div>
             ) : null}
@@ -670,6 +691,7 @@ export function RootDashboard({ initialData }: Props) {
                 onPlayerFactionChange={handlePlayerFactionChange}
                 onToggleParticipant={toggleParticipant}
                 onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
+                onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
                 onScoreChange={(player, value) =>
                   setForm((current) => {
                     const nextDominances = { ...current.participantDominances };
@@ -734,10 +756,12 @@ export function RootDashboard({ initialData }: Props) {
                 data={data}
                 seasonFilter={seasonFilter}
                 factionFilter={factionFilter}
+                venueFilter={venueFilter}
                 leaderboard={leaderboard}
                 classLeaders={classLeaders}
                 onSeasonFilterChange={setSeasonFilter}
                 onFactionFilterChange={(value) => setFactionFilter(value as (typeof FACTION_FILTERS)[number])}
+                onVenueFilterChange={setVenueFilter}
               />
             ) : null}
 
@@ -785,6 +809,7 @@ function RegisterPanel({
   onWinnerChange,
   onDateChange,
   onSeasonNumberChange,
+  onVenueChange,
   onScoreChange,
   onDominanceChange,
   onCoalitionPartnerChange,
@@ -798,6 +823,7 @@ function RegisterPanel({
   onWinnerChange: (winner: string) => void;
   onDateChange: (playedAt: string) => void;
   onSeasonNumberChange: (seasonNumber: number) => void;
+  onVenueChange: (venue: MatchVenue) => void;
   onScoreChange: (player: string, value: string) => void;
   onDominanceChange: (player: string, card: DominanceCard | null) => void;
   onCoalitionPartnerChange: (partner: string) => void;
@@ -827,7 +853,7 @@ function RegisterPanel({
         <p className="mt-1 text-sm text-bark/70">Escolham de 3 a 6 participantes, o vencedor e a facção de cada um.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <label className="space-y-2 text-sm font-semibold">
           <span>Data da partida</span>
           <input
@@ -855,6 +881,26 @@ function RegisterPanel({
             })}
           </select>
         </label>
+
+        <div className="space-y-2 text-sm font-semibold">
+          <span>Modalidade</span>
+          <div className="flex rounded-2xl border-2 border-bark/10 bg-white/80 p-1">
+            {MATCH_VENUES.map((venue) => (
+              <button
+                key={venue}
+                type="button"
+                onClick={() => onVenueChange(venue)}
+                className={
+                  form.venue === venue
+                    ? "flex-1 rounded-xl bg-moss px-3 py-2.5 text-sm font-bold text-cream shadow-sm transition"
+                    : "flex-1 rounded-xl px-3 py-2.5 text-sm font-bold text-bark/70 transition hover:bg-bark/5"
+                }
+              >
+                {formatMatchVenue(venue)}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <label className="space-y-2 text-sm font-semibold">
           <span>Vencedor</span>
@@ -1054,14 +1100,17 @@ function LeaderboardPanel({
   data,
   seasonFilter,
   factionFilter,
+  venueFilter,
   leaderboard,
   classLeaders,
   onSeasonFilterChange,
-  onFactionFilterChange
+  onFactionFilterChange,
+  onVenueFilterChange
 }: {
   data: DashboardData;
   seasonFilter: string;
   factionFilter: string;
+  venueFilter: MatchVenueFilter;
   leaderboard: Array<{ player: string; wins: number; factionWins: [string, number][]; winrate: number | null; matchesPlayed: number }>;
   classLeaders: Array<{
     faction: string;
@@ -1073,6 +1122,7 @@ function LeaderboardPanel({
   }>;
   onSeasonFilterChange: (value: string) => void;
   onFactionFilterChange: (value: string) => void;
+  onVenueFilterChange: (value: MatchVenueFilter) => void;
 }) {
   const [leadersExpanded, setLeadersExpanded] = useState(false);
   const [sortBy, setSortBy] = useState<"wins" | "winrate">("wins");
@@ -1088,7 +1138,7 @@ function LeaderboardPanel({
           <h2 className="storybook-title text-2xl">Leaderboard</h2>
           <p className="mt-1 text-sm text-bark/70">Veja o ranking geral e os melhores por facção.</p>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <label className="space-y-1 text-sm font-semibold w-full">
             <span>Season</span>
             <select
@@ -1101,6 +1151,18 @@ function LeaderboardPanel({
                   {season.label}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold w-full">
+            <span>Modalidade</span>
+            <select
+              className="w-full max-w-xs rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+              value={venueFilter}
+              onChange={(event) => onVenueFilterChange(event.target.value as MatchVenueFilter)}
+            >
+              <option value="all">Todas</option>
+              <option value="online">Online</option>
+              <option value="presencial">Presencial</option>
             </select>
           </label>
           <label className="space-y-1 text-sm font-semibold w-full">
@@ -1231,10 +1293,12 @@ function HistoryPanel({
 }) {
   const [playerFilter, setPlayerFilter] = useState("all");
   const [coalitionFilter, setCoalitionFilter] = useState<"all" | "coalition" | "coalition_win" | "no_coalition">("all");
+  const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
 
   const historyMatches = useMemo(() => {
     return data.matches.filter((match) => {
       if (seasonFilter !== "all" && match.seasonLabel !== seasonFilter) return false;
+      if (!matchesVenueFilter(match, venueFilter)) return false;
 
       if (playerFilter !== "all" && !getVictoryRecipients(match).includes(playerFilter)) {
         return false;
@@ -1248,7 +1312,7 @@ function HistoryPanel({
 
       return true;
     });
-  }, [data.matches, seasonFilter, playerFilter, coalitionFilter]);
+  }, [data.matches, seasonFilter, playerFilter, coalitionFilter, venueFilter]);
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
@@ -1267,7 +1331,7 @@ function HistoryPanel({
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="space-y-1 text-sm font-semibold">
           <span>Season</span>
           <select
@@ -1280,6 +1344,18 @@ function HistoryPanel({
                 {season.label}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-semibold">
+          <span>Modalidade</span>
+          <select
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            value={venueFilter}
+            onChange={(event) => setVenueFilter(event.target.value as MatchVenueFilter)}
+          >
+            <option value="all">Todas</option>
+            <option value="online">Online</option>
+            <option value="presencial">Presencial</option>
           </select>
         </label>
         <label className="space-y-1 text-sm font-semibold">
@@ -1531,6 +1607,7 @@ function HistoryCard({
               {match.seasonLabel}
             </span>
             <span className="leaf-chip">{formatDisplayDate(match.playedAt)}</span>
+            <span className="leaf-chip">{formatMatchVenue(match.venue)}</span>
           </div>
           <div>
             <h3 className="text-xl font-bold text-bark">{match.winner}</h3>
