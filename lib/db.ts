@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import type { DominanceCard } from "@/lib/constants";
 import { DOMINANCE_CARDS } from "@/lib/constants";
 import { isValidSeasonNumber, listSeasonOptions, seasonLabel } from "@/lib/seasons";
+import { DEFAULT_MATCH_MAP, normalizeMatchMap, type MatchMap } from "@/lib/match-map";
 import { DEFAULT_MATCH_VENUE, normalizeMatchVenue, type MatchVenue } from "@/lib/match-venue";
 import type { ActivityLog, DashboardData, MatchRecord, VagabondCoalition } from "@/lib/types";
 
@@ -102,6 +103,19 @@ export async function ensureSchema() {
   `;
 
   await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS board_map TEXT NOT NULL DEFAULT 'floresta';
+  `;
+
+  await sql`
+    UPDATE matches
+    SET board_map = ${DEFAULT_MATCH_MAP}
+    WHERE board_map IS NULL
+      OR TRIM(board_map) = ''
+      OR board_map NOT IN ('floresta', 'inverno', 'lago', 'montanha');
+  `;
+
+  await sql`
     INSERT INTO app_settings (key, value)
     VALUES ('current_season', '1')
     ON CONFLICT (key) DO NOTHING;
@@ -153,6 +167,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
       season_label,
       season_number,
       venue,
+      board_map,
       created_at
     FROM matches
     ORDER BY played_at DESC, created_at DESC;
@@ -172,6 +187,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
     season_label: string;
     season_number: number;
     venue: string | null;
+    board_map: string | null;
     created_at: string;
   }>;
 
@@ -261,6 +277,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
       seasonLabel: row.season_label,
       seasonNumber: row.season_number,
       venue: normalizeMatchVenue(row.venue),
+      boardMap: normalizeMatchMap(row.board_map),
       createdAt: row.created_at
     };
   });
@@ -315,6 +332,7 @@ export async function createMatch(input: {
   playedAt: string;
   seasonNumber: number;
   venue: MatchVenue;
+  boardMap: MatchMap;
   actorName: string;
 }) {
   await ensureSchema();
@@ -350,7 +368,8 @@ export async function createMatch(input: {
       played_at,
       season_label,
       season_number,
-      venue
+      venue,
+      board_map
     ) VALUES (
       ${id},
       ${input.winner},
@@ -366,7 +385,8 @@ export async function createMatch(input: {
       ${input.playedAt},
       ${matchSeasonLabel},
       ${input.seasonNumber},
-      ${input.venue}
+      ${input.venue},
+      ${input.boardMap}
     );
   `;
 

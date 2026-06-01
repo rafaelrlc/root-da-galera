@@ -3,6 +3,7 @@ import { requireSessionUser } from "@/lib/auth";
 import { DOMINANCE_CARDS, FACTIONS, PLAYERS, type DominanceCard } from "@/lib/constants";
 import { createMatch } from "@/lib/db";
 import { findVagabondPlayer, formatCoalitionWinner } from "@/lib/match-utils";
+import { normalizeMatchMap } from "@/lib/match-map";
 import { DEFAULT_MATCH_VENUE, isValidMatchVenue, normalizeMatchVenue } from "@/lib/match-venue";
 import { isValidSeasonNumber } from "@/lib/seasons";
 import type { VagabondCoalition } from "@/lib/types";
@@ -21,6 +22,7 @@ function validatePayload(payload: {
   playedAt?: string;
   seasonNumber?: number;
   venue?: string;
+  boardMap?: string;
 }) {
   if (!Array.isArray(payload.participants) || payload.participants.length < 3 || payload.participants.length > 6) {
     return "A partida precisa ter entre 3 e 6 participantes.";
@@ -238,6 +240,7 @@ export async function POST(request: NextRequest) {
     playedAt: payload.playedAt,
     seasonNumber: payload.seasonNumber,
     venue: normalizeMatchVenue(payload.venue),
+    boardMap: normalizeMatchMap(payload.boardMap),
     actorName
   });
 
