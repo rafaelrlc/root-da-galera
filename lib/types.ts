@@ -1,4 +1,5 @@
 import type { DominanceCard } from "@/lib/constants";
+import type { MatchMap } from "@/lib/match-map";
 import type { MatchVenue } from "@/lib/match-venue";
 
 export type VagabondCoalition = {
@@ -23,6 +24,7 @@ export type MatchRecord = {
   seasonLabel: string;
   seasonNumber: number;
   venue: MatchVenue;
+  boardMap: MatchMap;
   createdAt: string;
 };
 

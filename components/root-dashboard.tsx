@@ -22,6 +22,14 @@ import {
   sortFactionsForDisplay
 } from "@/lib/match-utils";
 import {
+  DEFAULT_MATCH_MAP,
+  formatMatchMap,
+  MATCH_MAPS,
+  matchesMapFilter,
+  type MatchMap,
+  type MatchMapFilter
+} from "@/lib/match-map";
+import {
   DEFAULT_MATCH_VENUE,
   formatMatchVenue,
   MATCH_VENUES,
@@ -32,6 +40,7 @@ import {
 import { MAX_SEASON_NUMBER, MIN_SEASON_NUMBER } from "@/lib/seasons";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
+import { MapBadge, MapSelector } from "@/components/map-selector";
 import { StatsPanel } from "@/components/stats-panel";
 
 type Props = {
@@ -48,6 +57,7 @@ type FormState = {
   playedAt: string;
   seasonNumber: number;
   venue: MatchVenue;
+  boardMap: MatchMap;
   coalitionPartner: string;
   coalitionWon: boolean;
 };
@@ -63,6 +73,7 @@ function createEmptyForm(seasonNumber: number): FormState {
     playedAt: new Date().toISOString().slice(0, 10),
     seasonNumber,
     venue: DEFAULT_MATCH_VENUE,
+    boardMap: DEFAULT_MATCH_MAP,
     coalitionPartner: "",
     coalitionWon: false
   };
@@ -120,7 +131,8 @@ function buildMatchPayload(form: FormState) {
       dominanceCard: participantDominances[vagabondCoalition.vagabond],
       playedAt: form.playedAt,
       seasonNumber: form.seasonNumber,
-      venue: form.venue
+      venue: form.venue,
+      boardMap: form.boardMap
     };
   }
 
@@ -139,7 +151,8 @@ function buildMatchPayload(form: FormState) {
     dominanceCard: winnerDominance ?? null,
     playedAt: form.playedAt,
     seasonNumber: form.seasonNumber,
-    venue: form.venue
+    venue: form.venue,
+    boardMap: form.boardMap
   };
 }
 
@@ -180,6 +193,7 @@ export function RootDashboard({ initialData }: Props) {
   const [seasonFilter, setSeasonFilter] = useState("all");
   const [factionFilter, setFactionFilter] = useState<(typeof FACTION_FILTERS)[number]>("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
+  const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
   const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats">(
     initialData.meta.isGuest ? "leaderboard" : "register"
   );
@@ -204,9 +218,10 @@ export function RootDashboard({ initialData }: Props) {
       const seasonMatches = seasonFilter === "all" || match.seasonLabel === seasonFilter;
       const factionMatches = factionFilter === "all" || match.winningFaction === factionFilter;
       const venueMatches = matchesVenueFilter(match, venueFilter);
-      return seasonMatches && factionMatches && venueMatches;
+      const mapMatches = matchesMapFilter(match, mapFilter);
+      return seasonMatches && factionMatches && venueMatches && mapMatches;
     });
-  }, [data.matches, seasonFilter, factionFilter, venueFilter]);
+  }, [data.matches, seasonFilter, factionFilter, venueFilter, mapFilter]);
 
   const leaderboard = useMemo(() => {
     const totals = new Map<string, number>();
@@ -223,7 +238,9 @@ export function RootDashboard({ initialData }: Props) {
 
     const seasonMatches = data.matches.filter(
       (match) =>
-        (seasonFilter === "all" || match.seasonLabel === seasonFilter) && matchesVenueFilter(match, venueFilter)
+        (seasonFilter === "all" || match.seasonLabel === seasonFilter) &&
+        matchesVenueFilter(match, venueFilter) &&
+        matchesMapFilter(match, mapFilter)
     );
 
     filteredMatches.forEach((match) => {
@@ -269,12 +286,14 @@ export function RootDashboard({ initialData }: Props) {
         };
       })
       .sort((a, b) => b.wins - a.wins || a.player.localeCompare(b.player));
-  }, [filteredMatches, data.matches, seasonFilter, factionFilter, venueFilter]);
+  }, [filteredMatches, data.matches, seasonFilter, factionFilter, venueFilter, mapFilter]);
 
   const classLeaders = useMemo(() => {
     const seasonMatches = data.matches.filter(
       (match) =>
-        (seasonFilter === "all" || match.seasonLabel === seasonFilter) && matchesVenueFilter(match, venueFilter)
+        (seasonFilter === "all" || match.seasonLabel === seasonFilter) &&
+        matchesVenueFilter(match, venueFilter) &&
+        matchesMapFilter(match, mapFilter)
     );
 
     return FACTIONS.map((faction) => {
@@ -316,7 +335,7 @@ export function RootDashboard({ initialData }: Props) {
         isTie: leaders.length > 1
       };
     });
-  }, [data.matches, seasonFilter, venueFilter]);
+  }, [data.matches, seasonFilter, venueFilter, mapFilter]);
 
   function toggleParticipant(player: string) {
     setForm((current) => {
@@ -543,6 +562,7 @@ export function RootDashboard({ initialData }: Props) {
                     onToggleParticipant={toggleParticipant}
                     onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
                     onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
+                    onBoardMapChange={(boardMap) => setForm((current) => ({ ...current, boardMap }))}
                     onScoreChange={(player, value) =>
                       setForm((current) => {
                         const nextDominances = { ...current.participantDominances };
@@ -692,6 +712,7 @@ export function RootDashboard({ initialData }: Props) {
                 onToggleParticipant={toggleParticipant}
                 onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
                 onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
+                onBoardMapChange={(boardMap) => setForm((current) => ({ ...current, boardMap }))}
                 onScoreChange={(player, value) =>
                   setForm((current) => {
                     const nextDominances = { ...current.participantDominances };
@@ -810,6 +831,7 @@ function RegisterPanel({
   onDateChange,
   onSeasonNumberChange,
   onVenueChange,
+  onBoardMapChange,
   onScoreChange,
   onDominanceChange,
   onCoalitionPartnerChange,
@@ -824,6 +846,7 @@ function RegisterPanel({
   onDateChange: (playedAt: string) => void;
   onSeasonNumberChange: (seasonNumber: number) => void;
   onVenueChange: (venue: MatchVenue) => void;
+  onBoardMapChange: (boardMap: MatchMap) => void;
   onScoreChange: (player: string, value: string) => void;
   onDominanceChange: (player: string, card: DominanceCard | null) => void;
   onCoalitionPartnerChange: (partner: string) => void;
@@ -848,12 +871,18 @@ function RegisterPanel({
 
   return (
     <form className="flex h-full flex-col gap-5 overflow-y-auto pr-1" onSubmit={onSubmit}>
-      <div>
-        <h2 className="storybook-title text-2xl">Registrar vitória</h2>
-        <p className="mt-1 text-sm text-bark/70">Escolham de 3 a 6 participantes, o vencedor e a facção de cada um.</p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <h2 className="storybook-title text-2xl">Registrar vitória</h2>
+          <p className="mt-1 text-sm text-bark/70">Escolham de 3 a 6 participantes, o vencedor e a facção de cada um.</p>
+        </div>
+        <div className="shrink-0 space-y-1.5 sm:text-right">
+          <span className="block text-sm font-semibold text-bark">Mapa</span>
+          <MapSelector value={form.boardMap} onChange={onBoardMapChange} />
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-2 text-sm font-semibold">
           <span>Data da partida</span>
           <input
@@ -882,27 +911,7 @@ function RegisterPanel({
           </select>
         </label>
 
-        <div className="space-y-2 text-sm font-semibold">
-          <span>Modalidade</span>
-          <div className="flex rounded-2xl border-2 border-bark/10 bg-white/80 p-1">
-            {MATCH_VENUES.map((venue) => (
-              <button
-                key={venue}
-                type="button"
-                onClick={() => onVenueChange(venue)}
-                className={
-                  form.venue === venue
-                    ? "flex-1 rounded-xl bg-moss px-3 py-2.5 text-sm font-bold text-cream shadow-sm transition"
-                    : "flex-1 rounded-xl px-3 py-2.5 text-sm font-bold text-bark/70 transition hover:bg-bark/5"
-                }
-              >
-                {formatMatchVenue(venue)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="space-y-2 text-sm font-semibold">
+        <label className="space-y-2 text-sm font-semibold sm:col-span-2 lg:col-span-1">
           <span>Vencedor</span>
           <select
             className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss disabled:opacity-50"
@@ -920,6 +929,26 @@ function RegisterPanel({
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="max-w-xs space-y-2 text-sm font-semibold">
+        <span>Modalidade</span>
+        <div className="inline-flex w-full rounded-2xl border-2 border-bark/10 bg-white/80 p-1">
+          {MATCH_VENUES.map((venue) => (
+            <button
+              key={venue}
+              type="button"
+              onClick={() => onVenueChange(venue)}
+              className={
+                form.venue === venue
+                  ? "min-w-0 flex-1 whitespace-nowrap rounded-xl bg-moss px-4 py-2.5 text-sm font-bold text-cream shadow-sm transition"
+                  : "min-w-0 flex-1 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-bold text-bark/70 transition hover:bg-bark/5"
+              }
+            >
+              {formatMatchVenue(venue)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -1294,11 +1323,13 @@ function HistoryPanel({
   const [playerFilter, setPlayerFilter] = useState("all");
   const [coalitionFilter, setCoalitionFilter] = useState<"all" | "coalition" | "coalition_win" | "no_coalition">("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
+  const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
 
   const historyMatches = useMemo(() => {
     return data.matches.filter((match) => {
       if (seasonFilter !== "all" && match.seasonLabel !== seasonFilter) return false;
       if (!matchesVenueFilter(match, venueFilter)) return false;
+      if (!matchesMapFilter(match, mapFilter)) return false;
 
       if (playerFilter !== "all" && !getVictoryRecipients(match).includes(playerFilter)) {
         return false;
@@ -1312,7 +1343,7 @@ function HistoryPanel({
 
       return true;
     });
-  }, [data.matches, seasonFilter, playerFilter, coalitionFilter, venueFilter]);
+  }, [data.matches, seasonFilter, playerFilter, coalitionFilter, venueFilter, mapFilter]);
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pr-1">
@@ -1331,7 +1362,7 @@ function HistoryPanel({
         </button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <label className="space-y-1 text-sm font-semibold">
           <span>Season</span>
           <select
@@ -1359,6 +1390,21 @@ function HistoryPanel({
           </select>
         </label>
         <label className="space-y-1 text-sm font-semibold">
+          <span>Mapa</span>
+          <select
+            className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
+            value={mapFilter}
+            onChange={(event) => setMapFilter(event.target.value as MatchMapFilter)}
+          >
+            <option value="all">Todos</option>
+            {MATCH_MAPS.map((map) => (
+              <option key={map} value={map}>
+                {formatMatchMap(map)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm font-semibold">
           <span>Vencedor</span>
           <select
             className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
@@ -1373,7 +1419,7 @@ function HistoryPanel({
             ))}
           </select>
         </label>
-        <label className="space-y-1 text-sm font-semibold">
+        <label className="space-y-1 text-sm font-semibold sm:col-span-2 lg:col-span-1">
           <span>Coalizão</span>
           <select
             className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss"
@@ -1630,6 +1676,10 @@ function HistoryCard({
                   .join(" · ")}
               </p>
             ) : null}
+          </div>
+          <div className="space-y-2">
+            <span className="text-xs font-bold uppercase tracking-[0.14em] text-bark/50">Mapa</span>
+            <MapBadge map={match.boardMap} />
           </div>
           <MatchFactionsDisplay match={match} />
           {match.vagabondCoalition && !match.coalitionWinners?.length ? (

@@ -9,6 +9,7 @@ import {
 import type { DashboardData } from "@/lib/types";
 import { FACTIONS, PLAYERS } from "@/lib/constants";
 import { getVictoryRecipients } from "@/lib/match-utils";
+import { formatMatchMap, MATCH_MAPS, matchesMapFilter, type MatchMapFilter } from "@/lib/match-map";
 import { matchesVenueFilter, type MatchVenueFilter } from "@/lib/match-venue";
 
 const PLAYER_COLORS: Record<string, string> = {
@@ -61,13 +62,17 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 export function StatsPanel({ data }: { data: DashboardData }) {
   const [seasonFilter, setSeasonFilter] = useState("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
+  const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
 
   const matches = useMemo(
     () =>
       data.matches.filter(
-        (m) => (seasonFilter === "all" || m.seasonLabel === seasonFilter) && matchesVenueFilter(m, venueFilter)
+        (m) =>
+          (seasonFilter === "all" || m.seasonLabel === seasonFilter) &&
+          matchesVenueFilter(m, venueFilter) &&
+          matchesMapFilter(m, mapFilter)
       ),
-    [data.matches, seasonFilter, venueFilter]
+    [data.matches, seasonFilter, venueFilter, mapFilter]
   );
 
   // ── 1. Vitórias por jogador ───────────────────────────────────────────────
@@ -162,11 +167,11 @@ export function StatsPanel({ data }: { data: DashboardData }) {
           <h2 className="storybook-title text-2xl">Estatísticas</h2>
           <p className="mt-1 text-sm text-bark/70">Gráficos e análises das partidas registradas.</p>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
           <label className="space-y-1 text-sm font-semibold">
             <span>Season</span>
             <select
-              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-44"
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
               value={seasonFilter}
               onChange={(e) => setSeasonFilter(e.target.value)}
             >
@@ -178,13 +183,28 @@ export function StatsPanel({ data }: { data: DashboardData }) {
           <label className="space-y-1 text-sm font-semibold">
             <span>Modalidade</span>
             <select
-              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-44"
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
               value={venueFilter}
               onChange={(e) => setVenueFilter(e.target.value as MatchVenueFilter)}
             >
               <option value="all">Todas</option>
               <option value="online">Online</option>
               <option value="presencial">Presencial</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-sm font-semibold">
+            <span>Mapa</span>
+            <select
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
+              value={mapFilter}
+              onChange={(e) => setMapFilter(e.target.value as MatchMapFilter)}
+            >
+              <option value="all">Todos</option>
+              {MATCH_MAPS.map((map) => (
+                <option key={map} value={map}>
+                  {formatMatchMap(map)}
+                </option>
+              ))}
             </select>
           </label>
         </div>
