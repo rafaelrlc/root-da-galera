@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSessionUser } from "@/lib/auth";
 import { DOMINANCE_CARDS, FACTIONS, PLAYERS, type DominanceCard } from "@/lib/constants";
+import { deriveGuestParticipants, isLeaguePlayer, validateGuestName } from "@/lib/league-players";
 import { createMatch } from "@/lib/db";
 import { findVagabondPlayer, formatCoalitionWinner } from "@/lib/match-utils";
 import { normalizeMatchMap } from "@/lib/match-map";
@@ -23,6 +24,7 @@ function validatePayload(payload: {
   seasonNumber?: number;
   venue?: string;
   boardMap?: string;
+  guestParticipants?: string[];
 }) {
   if (!Array.isArray(payload.participants) || payload.participants.length < 3 || payload.participants.length > 6) {
     return "A partida precisa ter entre 3 e 6 participantes.";
@@ -32,8 +34,26 @@ function validatePayload(payload: {
     return "Os participantes não podem se repetir.";
   }
 
-  if (!payload.participants.every((player) => PLAYERS.includes(player as (typeof PLAYERS)[number]))) {
-    return "Há participantes inválidos.";
+  const guestParticipants = payload.guestParticipants ?? deriveGuestParticipants(payload.participants ?? []);
+
+  for (const guest of guestParticipants) {
+    const guestError = validateGuestName(guest, payload.participants?.filter((player) => player !== guest));
+    if (guestError) {
+      return `Jogador temporário inválido: ${guestError}`;
+    }
+    if (!payload.participants?.includes(guest)) {
+      return "Jogador temporário precisa estar entre os participantes.";
+    }
+  }
+
+  for (const participant of payload.participants ?? []) {
+    const isGuest = guestParticipants.includes(participant);
+    if (!isLeaguePlayer(participant) && !isGuest) {
+      return `Participante inválido: ${participant}.`;
+    }
+    if (isLeaguePlayer(participant) && isGuest) {
+      return "Jogador da liga não pode ser marcado como temporário.";
+    }
   }
 
   if (!payload.participantFactions || typeof payload.participantFactions !== "object") {
@@ -126,10 +146,7 @@ function validatePayload(payload: {
       return "Rótulo de vitória da coalizão inválido.";
     }
   } else {
-    if (!payload.winner || !PLAYERS.includes(payload.winner as (typeof PLAYERS)[number])) {
-      return "Vencedor inválido.";
-    }
-    if (!payload.participants.includes(payload.winner)) {
+    if (!payload.winner || !payload.participants.includes(payload.winner)) {
       return "O vencedor precisa estar entre os participantes.";
     }
   }
@@ -241,6 +258,7 @@ export async function POST(request: NextRequest) {
     seasonNumber: payload.seasonNumber,
     venue: normalizeMatchVenue(payload.venue),
     boardMap: normalizeMatchMap(payload.boardMap),
+    guestParticipants: payload.guestParticipants ?? deriveGuestParticipants(payload.participants),
     actorName
   });
 
