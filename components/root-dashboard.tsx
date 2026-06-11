@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { ChevronDown, Download, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User } from "lucide-react";
+import { ChevronDown, Download, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User, UserPlus, X } from "lucide-react";
 import { PlayerDominanceSelect } from "@/components/player-dominance-select";
 import { FACTIONS, FACTION_FILTERS, PLAYERS, type DominanceCard } from "@/lib/constants";
 import { exportMatchesToExcel } from "@/lib/export";
@@ -40,8 +40,18 @@ import {
 import { MAX_SEASON_NUMBER, MIN_SEASON_NUMBER } from "@/lib/seasons";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
+import { FactionDraftPanel } from "@/components/faction-draft-panel";
 import { MapBadge, MapSelector } from "@/components/map-selector";
 import { StatsPanel } from "@/components/stats-panel";
+import type { DraftPick } from "@/lib/faction-draft";
+import {
+  deriveGuestParticipants,
+  isGuestParticipant,
+  isLeaguePlayer,
+  getLeagueParticipants,
+  getLeagueVictoryRecipients,
+  validateGuestName
+} from "@/lib/league-players";
 
 type Props = {
   initialData: DashboardData;
@@ -132,7 +142,8 @@ function buildMatchPayload(form: FormState) {
       playedAt: form.playedAt,
       seasonNumber: form.seasonNumber,
       venue: form.venue,
-      boardMap: form.boardMap
+      boardMap: form.boardMap,
+      guestParticipants: deriveGuestParticipants(form.participants)
     };
   }
 
@@ -152,7 +163,8 @@ function buildMatchPayload(form: FormState) {
     playedAt: form.playedAt,
     seasonNumber: form.seasonNumber,
     venue: form.venue,
-    boardMap: form.boardMap
+    boardMap: form.boardMap,
+    guestParticipants: deriveGuestParticipants(form.participants)
   };
 }
 
@@ -194,10 +206,10 @@ export function RootDashboard({ initialData }: Props) {
   const [factionFilter, setFactionFilter] = useState<(typeof FACTION_FILTERS)[number]>("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
   const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
-  const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats">(
+  const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats" | "draft">(
     initialData.meta.isGuest ? "leaderboard" : "register"
   );
-  const [desktopTab, setDesktopTab] = useState<"overview" | "leaderboard" | "records" | "seasons" | "stats">(
+  const [desktopTab, setDesktopTab] = useState<"overview" | "leaderboard" | "records" | "seasons" | "stats" | "draft">(
     initialData.meta.isGuest ? "leaderboard" : "overview"
   );
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -244,7 +256,7 @@ export function RootDashboard({ initialData }: Props) {
     );
 
     filteredMatches.forEach((match) => {
-      getVictoryRecipients(match).forEach((player) => {
+      getLeagueVictoryRecipients(match).forEach((player) => {
         totals.set(player, (totals.get(player) ?? 0) + 1);
         const playerFactionMap = byFaction.get(player) ?? new Map<string, number>();
         playerFactionMap.set(match.winningFaction, (playerFactionMap.get(match.winningFaction) ?? 0) + 1);
@@ -253,7 +265,7 @@ export function RootDashboard({ initialData }: Props) {
     });
 
     seasonMatches.forEach((match) => {
-      match.participants.forEach((player) => {
+      getLeagueParticipants(match).forEach((player) => {
         totalPlayed.set(player, (totalPlayed.get(player) ?? 0) + 1);
         const faction = match.participantFactions[player];
         if (faction) {
@@ -299,10 +311,11 @@ export function RootDashboard({ initialData }: Props) {
     return FACTIONS.map((faction) => {
       const stats = PLAYERS.map((player) => {
         const wins = seasonMatches.filter(
-          (match) => getVictoryRecipients(match).includes(player) && match.winningFaction === faction
+          (match) => getLeagueVictoryRecipients(match).includes(player) && match.winningFaction === faction
         ).length;
         const matchesPlayed = seasonMatches.filter(
-          (match) => match.participants.includes(player) && match.participantFactions[player] === faction
+          (match) =>
+            getLeagueParticipants(match).includes(player) && match.participantFactions[player] === faction
         ).length;
         const winrate = matchesPlayed > 0 ? wins / matchesPlayed : null;
 
@@ -374,6 +387,64 @@ export function RootDashboard({ initialData }: Props) {
         participantScores: nextParticipantScores,
         participantDominances: nextParticipantDominances,
         coalitionPartner,
+        winningFaction: nextParticipantFactions[winner] ?? current.winningFaction
+      };
+    });
+  }
+
+  function addGuestPlayer(name: string) {
+    const trimmed = name.trim().replace(/\s+/g, " ");
+    const error = validateGuestName(trimmed, form.participants);
+    if (error) {
+      alert(error);
+      return;
+    }
+
+    setForm((current) => {
+      if (current.participants.length >= 6) return current;
+
+      const usedFactions = new Set(Object.values(current.participantFactions));
+      const defaultFaction = FACTIONS.find((faction) => !usedFactions.has(faction)) ?? FACTIONS[0];
+      const nextParticipants = [...current.participants, trimmed];
+      const winner = current.winner || trimmed;
+
+      return {
+        ...current,
+        participants: nextParticipants,
+        winner,
+        participantFactions: { ...current.participantFactions, [trimmed]: defaultFaction },
+        participantScores: { ...current.participantScores, [trimmed]: "" },
+        winningFaction: current.participantFactions[winner] ?? defaultFaction
+      };
+    });
+  }
+
+  function removeGuestPlayer(name: string) {
+    if (isLeaguePlayer(name)) return;
+
+    setForm((current) => {
+      const nextParticipants = current.participants.filter((player) => player !== name);
+      const winner = nextParticipants.includes(current.winner) ? current.winner : (nextParticipants[0] ?? "");
+      const nextParticipantFactions = { ...current.participantFactions };
+      const nextParticipantScores = { ...current.participantScores };
+      const nextParticipantDominances = { ...current.participantDominances };
+      delete nextParticipantFactions[name];
+      delete nextParticipantScores[name];
+      delete nextParticipantDominances[name];
+
+      const coalitionPartner = nextParticipants.includes(current.coalitionPartner)
+        ? current.coalitionPartner
+        : "";
+
+      return {
+        ...current,
+        participants: nextParticipants,
+        winner,
+        participantFactions: nextParticipantFactions,
+        participantScores: nextParticipantScores,
+        participantDominances: nextParticipantDominances,
+        coalitionPartner,
+        coalitionWon: coalitionPartner ? current.coalitionWon : false,
         winningFaction: nextParticipantFactions[winner] ?? current.winningFaction
       };
     });
@@ -489,6 +560,36 @@ export function RootDashboard({ initialData }: Props) {
     window.location.reload();
   }
 
+  function applyDraftToRegister(assignments: Record<string, DraftPick>) {
+    const participants = Object.keys(assignments);
+    const unsupported = Object.values(assignments)
+      .map((pick) => pick.faction)
+      .filter((faction) => !FACTIONS.includes(faction as (typeof FACTIONS)[number]));
+
+    if (unsupported.length > 0) {
+      alert(
+        `Algumas facções do draft (${unsupported.join(", ")}) ainda não estão no registro de partidas. Ajuste manualmente no formulário.`
+      );
+    }
+
+    const participantFactions = Object.fromEntries(
+      Object.entries(assignments).map(([player, pick]) => [player, pick.faction])
+    );
+    const winner = participants[0] ?? "";
+
+    setForm({
+      ...createEmptyForm(currentSeasonNumber),
+      participants,
+      participantFactions,
+      winner,
+      winningFaction: participantFactions[winner] ?? FACTIONS[0],
+      venue: "presencial"
+    });
+    setDesktopTab("overview");
+    setActiveTab("register");
+    setToast("Draft aplicado ao formulário de registro.");
+  }
+
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6">
       <Toast message={toast} onClose={() => setToast(null)} />
@@ -546,6 +647,7 @@ export function RootDashboard({ initialData }: Props) {
               {isGuest && <TabButton active={desktopTab === "leaderboard"} onClick={() => setDesktopTab("leaderboard")}>Leaderboard</TabButton>}
               <TabButton active={desktopTab === "records"} onClick={() => setDesktopTab("records")}>Histórico & Logs</TabButton>
               <TabButton active={desktopTab === "stats"} onClick={() => setDesktopTab("stats")}>Estatísticas</TabButton>
+              <TabButton active={desktopTab === "draft"} onClick={() => setDesktopTab("draft")}>Draft</TabButton>
               {!isGuest && <TabButton active={desktopTab === "seasons"} onClick={() => setDesktopTab("seasons")}>Seasons</TabButton>}
             </div>
 
@@ -560,6 +662,8 @@ export function RootDashboard({ initialData }: Props) {
                     onDateChange={(playedAt) => setForm((current) => ({ ...current, playedAt }))}
                     onPlayerFactionChange={handlePlayerFactionChange}
                     onToggleParticipant={toggleParticipant}
+                    onAddGuest={addGuestPlayer}
+                    onRemoveGuest={removeGuestPlayer}
                     onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
                     onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
                     onBoardMapChange={(boardMap) => setForm((current) => ({ ...current, boardMap }))}
@@ -677,6 +781,12 @@ export function RootDashboard({ initialData }: Props) {
               </div>
             ) : null}
 
+            {desktopTab === "draft" ? (
+              <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
+                <FactionDraftPanel onApplyToRegister={!isGuest ? applyDraftToRegister : undefined} />
+              </div>
+            ) : null}
+
             {desktopTab === "seasons" && !isGuest ? (
               <div className="max-w-md">
                 <SeasonPanel
@@ -698,6 +808,7 @@ export function RootDashboard({ initialData }: Props) {
               <TabButton active={activeTab === "leaderboard"} onClick={() => setActiveTab("leaderboard")}>Leaderboard</TabButton>
               <TabButton active={activeTab === "history"} onClick={() => setActiveTab("history")}>Histórico</TabButton>
               <TabButton active={activeTab === "stats"} onClick={() => setActiveTab("stats")}>Estatísticas</TabButton>
+              <TabButton active={activeTab === "draft"} onClick={() => setActiveTab("draft")}>Draft</TabButton>
               <TabButton active={activeTab === "logs"} onClick={() => setActiveTab("logs")}>Logs</TabButton>
             </div>
 
@@ -710,6 +821,8 @@ export function RootDashboard({ initialData }: Props) {
                 onDateChange={(playedAt) => setForm((current) => ({ ...current, playedAt }))}
                 onPlayerFactionChange={handlePlayerFactionChange}
                 onToggleParticipant={toggleParticipant}
+                onAddGuest={addGuestPlayer}
+                onRemoveGuest={removeGuestPlayer}
                 onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
                 onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
                 onBoardMapChange={(boardMap) => setForm((current) => ({ ...current, boardMap }))}
@@ -801,6 +914,10 @@ export function RootDashboard({ initialData }: Props) {
               <StatsPanel data={data} />
             ) : null}
 
+            {activeTab === "draft" ? (
+              <FactionDraftPanel onApplyToRegister={!isGuest ? applyDraftToRegister : undefined} />
+            ) : null}
+
             {activeTab === "logs" ? (
               <LogsPanel logs={data.logs} />
             ) : null}
@@ -837,7 +954,9 @@ function RegisterPanel({
   onCoalitionPartnerChange,
   onCoalitionWonChange,
   onPlayerFactionChange,
-  onToggleParticipant
+  onToggleParticipant,
+  onAddGuest,
+  onRemoveGuest
 }: {
   form: FormState;
   pending: boolean;
@@ -853,7 +972,11 @@ function RegisterPanel({
   onCoalitionWonChange: (coalitionWon: boolean) => void;
   onPlayerFactionChange: (player: string, faction: string) => void;
   onToggleParticipant: (player: string) => void;
+  onAddGuest: (name: string) => void;
+  onRemoveGuest: (name: string) => void;
 }) {
+  const [guestInput, setGuestInput] = useState("");
+  const guestParticipants = deriveGuestParticipants(form.participants);
   const vagabondPlayer = findVagabondPlayer(form.participants, form.participantFactions);
   const vagabondDominance = vagabondPlayer ? form.participantDominances[vagabondPlayer] : undefined;
   const sortedForScores = [...form.participants].sort((playerA, playerB) => {
@@ -976,6 +1099,67 @@ function RegisterPanel({
           })}
         </div>
         <p className="text-xs text-bark/60">Para manter a mesa válida, o app deixa marcar entre 3 e 6 jogadores.</p>
+
+        <div className="rounded-[24px] border-2 border-dashed border-bark/15 bg-white/45 p-4">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-bark">
+            <UserPlus className="h-4 w-4" />
+            Jogador temporário
+          </div>
+          <p className="mb-3 text-xs text-bark/60">
+            Amigo ocasional, bot no online ou convidado. Entra no registro da partida, mas não conta em vitórias, winrate ou líderes por facção.
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 text-sm outline-none transition focus:border-moss"
+              placeholder="Ex.: Bot, João visitante"
+              value={guestInput}
+              onChange={(event) => setGuestInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (guestInput.trim()) {
+                    onAddGuest(guestInput);
+                    setGuestInput("");
+                  }
+                }
+              }}
+            />
+            <button
+              type="button"
+              disabled={form.participants.length >= 6 || !guestInput.trim()}
+              onClick={() => {
+                onAddGuest(guestInput);
+                setGuestInput("");
+              }}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border-2 border-moss/30 bg-moss/10 px-4 py-3 text-sm font-bold text-moss transition hover:bg-moss/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Adicionar
+            </button>
+          </div>
+          {guestParticipants.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {guestParticipants.map((guest) => (
+                <span
+                  key={guest}
+                  className="inline-flex items-center gap-2 rounded-full border-2 border-bark/15 bg-white/80 px-3 py-1.5 text-sm font-bold text-bark"
+                >
+                  {guest}
+                  <span className="rounded-full bg-bark/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bark/60">
+                    Temporário
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remover ${guest}`}
+                    onClick={() => onRemoveGuest(guest)}
+                    className="rounded-full p-0.5 text-bark/50 transition hover:bg-bark/10 hover:text-bark"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -990,8 +1174,13 @@ function RegisterPanel({
             );
             return (
               <div key={player} className="rounded-2xl border-2 border-bark/10 bg-white/50 px-3 py-2">
-                <span className={`mb-2 block text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
+                <span className={`mb-2 flex flex-wrap items-center gap-2 text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
                   {player}
+                  {!isLeaguePlayer(player) ? (
+                    <span className="rounded-full bg-bark/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bark/60">
+                      Temporário
+                    </span>
+                  ) : null}
                 </span>
                 <div className="grid grid-cols-5 gap-1.5">
                   {FACTIONS.map((faction) => {
@@ -1656,9 +1845,21 @@ function HistoryCard({
             <span className="leaf-chip">{formatMatchVenue(match.venue)}</span>
           </div>
           <div>
-            <h3 className="text-xl font-bold text-bark">{match.winner}</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-bold text-bark">{match.winner}</h3>
+              {!isCoalitionVictory(match) && isGuestParticipant(match, match.winner) ? (
+                <span className="rounded-full bg-bark/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bark/60">
+                  Temporário
+                </span>
+              ) : null}
+            </div>
             <p className="mt-1 text-sm text-bark/70">
-              venceu contra {getMatchOpponents(match).join(", ")}
+              venceu contra{" "}
+              {getMatchOpponents(match)
+                .map((player) =>
+                  isGuestParticipant(match, player) ? `${player} (temporário)` : player
+                )
+                .join(", ")}
             </p>
             {getWinnerDominanceCard(match) ? (
               <p className="mt-1 text-xs font-semibold text-bark/60">

@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import type { DashboardData } from "@/lib/types";
 import { FACTIONS, PLAYERS } from "@/lib/constants";
+import { getLeagueParticipants, getLeagueVictoryRecipients } from "@/lib/league-players";
 import { getVictoryRecipients } from "@/lib/match-utils";
 import { formatMatchMap, MATCH_MAPS, matchesMapFilter, type MatchMapFilter } from "@/lib/match-map";
 import { matchesVenueFilter, type MatchVenueFilter } from "@/lib/match-venue";
@@ -79,7 +80,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
   const winsByPlayer = useMemo(() => {
     const map = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
     matches.forEach((m) => {
-      getVictoryRecipients(m).forEach((player) => {
+      getLeagueVictoryRecipients(m).forEach((player) => {
         map.set(player, (map.get(player) ?? 0) + 1);
       });
     });
@@ -104,8 +105,8 @@ export function StatsPanel({ data }: { data: DashboardData }) {
     const played = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
     const wins   = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
     matches.forEach((m) => {
-      m.participants.forEach((p) => played.set(p, (played.get(p) ?? 0) + 1));
-      getVictoryRecipients(m).forEach((player) => {
+      getLeagueParticipants(m).forEach((p) => played.set(p, (played.get(p) ?? 0) + 1));
+      getLeagueVictoryRecipients(m).forEach((player) => {
         wins.set(player, (wins.get(player) ?? 0) + 1);
       });
     });
@@ -131,7 +132,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
     sorted.forEach((m) => {
       const date = new Date(m.playedAt);
       const month = `${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-      getVictoryRecipients(m).forEach((player) => {
+      getLeagueVictoryRecipients(m).forEach((player) => {
         cumulative.set(player, (cumulative.get(player) ?? 0) + 1);
       });
       byMonth[month] = Object.fromEntries(cumulative);
@@ -142,7 +143,12 @@ export function StatsPanel({ data }: { data: DashboardData }) {
 
   // Players who have at least one win in filtered matches
   const activePlayers = useMemo(
-    () => PLAYERS.filter((p) => matches.some((m) => getVictoryRecipients(m).includes(p) || m.participants.includes(p))),
+    () =>
+      PLAYERS.filter((p) =>
+        matches.some(
+          (m) => getLeagueVictoryRecipients(m).includes(p) || getLeagueParticipants(m).includes(p)
+        )
+      ),
     [matches]
   );
 

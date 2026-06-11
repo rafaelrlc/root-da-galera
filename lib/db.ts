@@ -2,6 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import type { DominanceCard } from "@/lib/constants";
 import { DOMINANCE_CARDS } from "@/lib/constants";
 import { isValidSeasonNumber, listSeasonOptions, seasonLabel } from "@/lib/seasons";
+import { deriveGuestParticipants } from "@/lib/league-players";
 import { DEFAULT_MATCH_MAP, normalizeMatchMap, type MatchMap } from "@/lib/match-map";
 import { DEFAULT_MATCH_VENUE, normalizeMatchVenue, type MatchVenue } from "@/lib/match-venue";
 import type { ActivityLog, DashboardData, MatchRecord, VagabondCoalition } from "@/lib/types";
@@ -116,6 +117,11 @@ export async function ensureSchema() {
   `;
 
   await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS guest_participants JSON NOT NULL DEFAULT '[]';
+  `;
+
+  await sql`
     INSERT INTO app_settings (key, value)
     VALUES ('current_season', '1')
     ON CONFLICT (key) DO NOTHING;
@@ -168,6 +174,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
       season_number,
       venue,
       board_map,
+      guest_participants,
       created_at
     FROM matches
     ORDER BY played_at DESC, created_at DESC;
@@ -188,6 +195,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
     season_number: number;
     venue: string | null;
     board_map: string | null;
+    guest_participants: string | string[] | null;
     created_at: string;
   }>;
 
@@ -278,6 +286,12 @@ export async function listMatches(): Promise<MatchRecord[]> {
       seasonNumber: row.season_number,
       venue: normalizeMatchVenue(row.venue),
       boardMap: normalizeMatchMap(row.board_map),
+      guestParticipants:
+        row.guest_participants == null
+          ? deriveGuestParticipants(participants)
+          : Array.isArray(row.guest_participants)
+          ? row.guest_participants
+          : (JSON.parse(row.guest_participants) as string[]),
       createdAt: row.created_at
     };
   });
@@ -333,6 +347,7 @@ export async function createMatch(input: {
   seasonNumber: number;
   venue: MatchVenue;
   boardMap: MatchMap;
+  guestParticipants: string[];
   actorName: string;
 }) {
   await ensureSchema();
@@ -369,7 +384,8 @@ export async function createMatch(input: {
       season_label,
       season_number,
       venue,
-      board_map
+      board_map,
+      guest_participants
     ) VALUES (
       ${id},
       ${input.winner},
@@ -386,7 +402,8 @@ export async function createMatch(input: {
       ${matchSeasonLabel},
       ${input.seasonNumber},
       ${input.venue},
-      ${input.boardMap}
+      ${input.boardMap},
+      ${JSON.stringify(input.guestParticipants)}
     );
   `;
 

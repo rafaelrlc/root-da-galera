@@ -25,6 +25,7 @@ export type MatchRecord = {
   seasonNumber: number;
   venue: MatchVenue;
   boardMap: MatchMap;
+  guestParticipants: string[];
   createdAt: string;
 };
 

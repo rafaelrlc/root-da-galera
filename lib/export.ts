@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
-import { getMatchOpponents, getSortedScores, getVictoryRecipients } from "@/lib/match-utils";
+import { getLeagueParticipants, getLeagueVictoryRecipients, isGuestParticipant } from "@/lib/league-players";
+import { getMatchOpponents, getSortedScores } from "@/lib/match-utils";
 import { formatMatchMap } from "@/lib/match-map";
 import { formatMatchVenue } from "@/lib/match-venue";
 import type { MatchRecord } from "@/lib/types";
@@ -39,7 +40,10 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
       .join(" | ");
 
     const factionList = match.participants
-      .map((p) => `${p}: ${match.participantFactions[p] ?? "—"}`)
+      .map((p) => {
+        const guestSuffix = isGuestParticipant(match, p) ? " (temp.)" : "";
+        return `${p}${guestSuffix}: ${match.participantFactions[p] ?? "—"}`;
+      })
       .join(" | ");
 
     return [
@@ -90,13 +94,13 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
   const playerMap = new Map<string, { wins: number; played: number; factions: Map<string, number> }>();
 
   for (const match of matches) {
-    for (const player of match.participants) {
+    for (const player of getLeagueParticipants(match)) {
       if (!playerMap.has(player)) {
         playerMap.set(player, { wins: 0, played: 0, factions: new Map() });
       }
       const entry = playerMap.get(player)!;
       entry.played += 1;
-      if (getVictoryRecipients(match).includes(player)) {
+      if (getLeagueVictoryRecipients(match).includes(player)) {
         entry.wins += 1;
         entry.factions.set(match.winningFaction, (entry.factions.get(match.winningFaction) ?? 0) + 1);
       }
