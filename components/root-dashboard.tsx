@@ -202,7 +202,7 @@ function validateFormScores(form: FormState) {
 export function RootDashboard({ initialData }: Props) {
   const [data, setData] = useState(initialData);
   const isGuest = data.meta.isGuest;
-  const [seasonFilter, setSeasonFilter] = useState("all");
+  const [seasonFilter, setSeasonFilter] = useState(initialData.meta.currentSeasonLabel);
   const [factionFilter, setFactionFilter] = useState<(typeof FACTION_FILTERS)[number]>("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
   const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
@@ -297,7 +297,7 @@ export function RootDashboard({ initialData }: Props) {
           matchesPlayed
         };
       })
-      .sort((a, b) => b.wins - a.wins || a.player.localeCompare(b.player));
+      .sort((a, b) => b.wins - a.wins || (b.winrate ?? -1) - (a.winrate ?? -1) || a.player.localeCompare(b.player));
   }, [filteredMatches, data.matches, seasonFilter, factionFilter, venueFilter, mapFilter]);
 
   const classLeaders = useMemo(() => {
@@ -1428,9 +1428,10 @@ function LeaderboardPanel({
             <div className="flex items-center justify-between gap-4">
               <div className="flex flex-wrap gap-2">
                 {entry.factionWins.length > 0 ? (
-                  entry.factionWins.slice(0, 3).map(([faction]) => (
-                    <span key={`${entry.player}-${faction}`} className="inline-flex items-center gap-2 rounded-full bg-white/75 px-2 py-1 text-sm font-bold text-bark">
+                  entry.factionWins.slice(0, 3).map(([faction, count]) => (
+                    <span key={`${entry.player}-${faction}`} className="inline-flex items-center gap-1.5 rounded-full bg-white/75 px-2 py-1 text-sm font-bold text-bark">
                       <FactionBadge faction={faction} iconOnly size="sm" />
+                      <span className="text-xs font-bold text-bark/70">{count}</span>
                     </span>
                   ))
                 ) : (
