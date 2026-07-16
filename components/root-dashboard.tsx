@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronDown, Download, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User, UserPlus, X } from "lucide-react";
 import { PlayerDominanceSelect } from "@/components/player-dominance-select";
-import { FACTIONS, FACTION_FILTERS, PLAYERS, type DominanceCard } from "@/lib/constants";
+import { FACTIONS, FACTION_FILTERS, type DominanceCard } from "@/lib/constants";
 import { exportMatchesToExcel } from "@/lib/export";
 import {
   findVagabondPlayer,
@@ -32,15 +32,19 @@ import {
 import {
   DEFAULT_MATCH_VENUE,
   formatMatchVenue,
-  MATCH_VENUES,
   matchesVenueFilter,
   type MatchVenue,
   type MatchVenueFilter
 } from "@/lib/match-venue";
+import {
+  DEFAULT_MATCH_OFFICIAL,
+  formatMatchOfficial
+} from "@/lib/match-official";
 import { MAX_SEASON_NUMBER, MIN_SEASON_NUMBER } from "@/lib/seasons";
 import type { ActivityLog, DashboardData, MatchRecord } from "@/lib/types";
 import { FactionBadge } from "@/components/faction-badge";
 import { FactionDraftPanel } from "@/components/faction-draft-panel";
+import { AdminPanel } from "@/components/admin-panel";
 import { MapBadge, MapSelector } from "@/components/map-selector";
 import { StatsPanel } from "@/components/stats-panel";
 import type { DraftPick } from "@/lib/faction-draft";
@@ -68,6 +72,7 @@ type FormState = {
   seasonNumber: number;
   venue: MatchVenue;
   boardMap: MatchMap;
+  isOfficial: boolean;
   coalitionPartner: string;
   coalitionWon: boolean;
 };
@@ -84,6 +89,7 @@ function createEmptyForm(seasonNumber: number): FormState {
     seasonNumber,
     venue: DEFAULT_MATCH_VENUE,
     boardMap: DEFAULT_MATCH_MAP,
+    isOfficial: DEFAULT_MATCH_OFFICIAL,
     coalitionPartner: "",
     coalitionWon: false
   };
@@ -109,7 +115,7 @@ function buildVagabondCoalition(form: FormState) {
   };
 }
 
-function buildMatchPayload(form: FormState) {
+function buildMatchPayload(form: FormState, leaguePlayers: readonly string[]) {
   const participantDominances = { ...form.participantDominances };
   const vagabondCoalition = buildVagabondCoalition(form);
 
@@ -143,7 +149,8 @@ function buildMatchPayload(form: FormState) {
       seasonNumber: form.seasonNumber,
       venue: form.venue,
       boardMap: form.boardMap,
-      guestParticipants: deriveGuestParticipants(form.participants)
+      isOfficial: form.isOfficial,
+      guestParticipants: deriveGuestParticipants(form.participants, leaguePlayers)
     };
   }
 
@@ -164,7 +171,8 @@ function buildMatchPayload(form: FormState) {
     seasonNumber: form.seasonNumber,
     venue: form.venue,
     boardMap: form.boardMap,
-    guestParticipants: deriveGuestParticipants(form.participants)
+    isOfficial: form.isOfficial,
+    guestParticipants: deriveGuestParticipants(form.participants, leaguePlayers)
   };
 }
 
@@ -202,14 +210,16 @@ function validateFormScores(form: FormState) {
 export function RootDashboard({ initialData }: Props) {
   const [data, setData] = useState(initialData);
   const isGuest = data.meta.isGuest;
+  const isAdmin = data.meta.isAdmin;
+  const players = data.players;
   const [seasonFilter, setSeasonFilter] = useState(initialData.meta.currentSeasonLabel);
   const [factionFilter, setFactionFilter] = useState<(typeof FACTION_FILTERS)[number]>("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
   const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
-  const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats" | "draft">(
+  const [activeTab, setActiveTab] = useState<"register" | "leaderboard" | "history" | "logs" | "stats" | "draft" | "admin">(
     initialData.meta.isGuest ? "leaderboard" : "register"
   );
-  const [desktopTab, setDesktopTab] = useState<"overview" | "leaderboard" | "records" | "seasons" | "stats" | "draft">(
+  const [desktopTab, setDesktopTab] = useState<"overview" | "leaderboard" | "records" | "seasons" | "stats" | "draft" | "admin">(
     initialData.meta.isGuest ? "leaderboard" : "overview"
   );
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -227,6 +237,7 @@ export function RootDashboard({ initialData }: Props) {
 
   const filteredMatches = useMemo(() => {
     return data.matches.filter((match) => {
+      if (!match.isOfficial) return false;
       const seasonMatches = seasonFilter === "all" || match.seasonLabel === seasonFilter;
       const factionMatches = factionFilter === "all" || match.winningFaction === factionFilter;
       const venueMatches = matchesVenueFilter(match, venueFilter);
@@ -241,7 +252,7 @@ export function RootDashboard({ initialData }: Props) {
     const totalPlayed = new Map<string, number>();
     const playedByFaction = new Map<string, Map<string, number>>();
 
-    PLAYERS.forEach((player) => {
+    players.forEach((player) => {
       totals.set(player, 0);
       byFaction.set(player, new Map());
       totalPlayed.set(player, 0);
@@ -250,6 +261,7 @@ export function RootDashboard({ initialData }: Props) {
 
     const seasonMatches = data.matches.filter(
       (match) =>
+        match.isOfficial &&
         (seasonFilter === "all" || match.seasonLabel === seasonFilter) &&
         matchesVenueFilter(match, venueFilter) &&
         matchesMapFilter(match, mapFilter)
@@ -298,18 +310,19 @@ export function RootDashboard({ initialData }: Props) {
         };
       })
       .sort((a, b) => b.wins - a.wins || (b.winrate ?? -1) - (a.winrate ?? -1) || a.player.localeCompare(b.player));
-  }, [filteredMatches, data.matches, seasonFilter, factionFilter, venueFilter, mapFilter]);
+  }, [filteredMatches, data.matches, players, seasonFilter, factionFilter, venueFilter, mapFilter]);
 
   const classLeaders = useMemo(() => {
     const seasonMatches = data.matches.filter(
       (match) =>
+        match.isOfficial &&
         (seasonFilter === "all" || match.seasonLabel === seasonFilter) &&
         matchesVenueFilter(match, venueFilter) &&
         matchesMapFilter(match, mapFilter)
     );
 
     return FACTIONS.map((faction) => {
-      const stats = PLAYERS.map((player) => {
+      const stats = players.map((player) => {
         const wins = seasonMatches.filter(
           (match) => getLeagueVictoryRecipients(match).includes(player) && match.winningFaction === faction
         ).length;
@@ -348,7 +361,7 @@ export function RootDashboard({ initialData }: Props) {
         isTie: leaders.length > 1
       };
     });
-  }, [data.matches, seasonFilter, venueFilter, mapFilter]);
+  }, [data.matches, players, seasonFilter, venueFilter, mapFilter]);
 
   function toggleParticipant(player: string) {
     setForm((current) => {
@@ -394,7 +407,7 @@ export function RootDashboard({ initialData }: Props) {
 
   function addGuestPlayer(name: string) {
     const trimmed = name.trim().replace(/\s+/g, " ");
-    const error = validateGuestName(trimmed, form.participants);
+    const error = validateGuestName(trimmed, form.participants, players);
     if (error) {
       alert(error);
       return;
@@ -420,7 +433,7 @@ export function RootDashboard({ initialData }: Props) {
   }
 
   function removeGuestPlayer(name: string) {
-    if (isLeaguePlayer(name)) return;
+    if (isLeaguePlayer(name, players)) return;
 
     setForm((current) => {
       const nextParticipants = current.participants.filter((player) => player !== name);
@@ -509,7 +522,7 @@ export function RootDashboard({ initialData }: Props) {
       const response = await fetch("/api/matches", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildMatchPayload(form))
+        body: JSON.stringify(buildMatchPayload(form, players))
       });
 
       if (!response.ok) {
@@ -649,12 +662,14 @@ export function RootDashboard({ initialData }: Props) {
               <TabButton active={desktopTab === "stats"} onClick={() => setDesktopTab("stats")}>Estatísticas</TabButton>
               <TabButton active={desktopTab === "draft"} onClick={() => setDesktopTab("draft")}>Draft</TabButton>
               {!isGuest && <TabButton active={desktopTab === "seasons"} onClick={() => setDesktopTab("seasons")}>Seasons</TabButton>}
+              {isAdmin && <TabButton active={desktopTab === "admin"} onClick={() => setDesktopTab("admin")}>Admin</TabButton>}
             </div>
 
             {desktopTab === "overview" && !isGuest ? (
               <div className="grid gap-5 xl:grid-cols-2">
                 <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
                   <RegisterPanel
+                    players={players}
                     form={form}
                     pending={pending}
                     onSubmit={submitMatch}
@@ -666,6 +681,7 @@ export function RootDashboard({ initialData }: Props) {
                     onRemoveGuest={removeGuestPlayer}
                     onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
                     onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
+                    onIsOfficialChange={(isOfficial) => setForm((current) => ({ ...current, isOfficial }))}
                     onBoardMapChange={(boardMap) => setForm((current) => ({ ...current, boardMap }))}
                     onScoreChange={(player, value) =>
                       setForm((current) => {
@@ -783,7 +799,16 @@ export function RootDashboard({ initialData }: Props) {
 
             {desktopTab === "draft" ? (
               <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
-                <FactionDraftPanel onApplyToRegister={!isGuest ? applyDraftToRegister : undefined} />
+                <FactionDraftPanel
+                  players={players}
+                  onApplyToRegister={!isGuest ? applyDraftToRegister : undefined}
+                />
+              </div>
+            ) : null}
+
+            {desktopTab === "admin" && isAdmin ? (
+              <div className="h-[72vh] overflow-hidden rounded-[28px] border-2 border-bark/10 bg-white/45 p-5">
+                <AdminPanel onMembersChanged={refreshData} />
               </div>
             ) : null}
 
@@ -810,10 +835,12 @@ export function RootDashboard({ initialData }: Props) {
               <TabButton active={activeTab === "stats"} onClick={() => setActiveTab("stats")}>Estatísticas</TabButton>
               <TabButton active={activeTab === "draft"} onClick={() => setActiveTab("draft")}>Draft</TabButton>
               <TabButton active={activeTab === "logs"} onClick={() => setActiveTab("logs")}>Logs</TabButton>
+              {isAdmin && <TabButton active={activeTab === "admin"} onClick={() => setActiveTab("admin")}>Admin</TabButton>}
             </div>
 
             {activeTab === "register" && !isGuest ? (
               <RegisterPanel
+                players={players}
                 form={form}
                 pending={pending}
                 onSubmit={submitMatch}
@@ -825,6 +852,7 @@ export function RootDashboard({ initialData }: Props) {
                 onRemoveGuest={removeGuestPlayer}
                 onSeasonNumberChange={(seasonNumber) => setForm((current) => ({ ...current, seasonNumber }))}
                 onVenueChange={(venue) => setForm((current) => ({ ...current, venue }))}
+                onIsOfficialChange={(isOfficial) => setForm((current) => ({ ...current, isOfficial }))}
                 onBoardMapChange={(boardMap) => setForm((current) => ({ ...current, boardMap }))}
                 onScoreChange={(player, value) =>
                   setForm((current) => {
@@ -915,8 +943,13 @@ export function RootDashboard({ initialData }: Props) {
             ) : null}
 
             {activeTab === "draft" ? (
-              <FactionDraftPanel onApplyToRegister={!isGuest ? applyDraftToRegister : undefined} />
+              <FactionDraftPanel
+                players={players}
+                onApplyToRegister={!isGuest ? applyDraftToRegister : undefined}
+              />
             ) : null}
+
+            {activeTab === "admin" && isAdmin ? <AdminPanel onMembersChanged={refreshData} /> : null}
 
             {activeTab === "logs" ? (
               <LogsPanel logs={data.logs} />
@@ -941,6 +974,7 @@ export function RootDashboard({ initialData }: Props) {
 }
 
 function RegisterPanel({
+  players,
   form,
   pending,
   onSubmit,
@@ -948,6 +982,7 @@ function RegisterPanel({
   onDateChange,
   onSeasonNumberChange,
   onVenueChange,
+  onIsOfficialChange,
   onBoardMapChange,
   onScoreChange,
   onDominanceChange,
@@ -958,6 +993,7 @@ function RegisterPanel({
   onAddGuest,
   onRemoveGuest
 }: {
+  players: string[];
   form: FormState;
   pending: boolean;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -965,6 +1001,7 @@ function RegisterPanel({
   onDateChange: (playedAt: string) => void;
   onSeasonNumberChange: (seasonNumber: number) => void;
   onVenueChange: (venue: MatchVenue) => void;
+  onIsOfficialChange: (isOfficial: boolean) => void;
   onBoardMapChange: (boardMap: MatchMap) => void;
   onScoreChange: (player: string, value: string) => void;
   onDominanceChange: (player: string, card: DominanceCard | null) => void;
@@ -1054,24 +1091,28 @@ function RegisterPanel({
         </label>
       </div>
 
-      <div className="max-w-xs space-y-2 text-sm font-semibold">
-        <span>Modalidade</span>
-        <div className="inline-flex w-full rounded-2xl border-2 border-bark/10 bg-white/80 p-1">
-          {MATCH_VENUES.map((venue) => (
-            <button
-              key={venue}
-              type="button"
-              onClick={() => onVenueChange(venue)}
-              className={
-                form.venue === venue
-                  ? "min-w-0 flex-1 whitespace-nowrap rounded-xl bg-moss px-4 py-2.5 text-sm font-bold text-cream shadow-sm transition"
-                  : "min-w-0 flex-1 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-bold text-bark/70 transition hover:bg-bark/5"
-              }
-            >
-              {formatMatchVenue(venue)}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onVenueChange(form.venue === "online" ? "presencial" : "online")}
+          className="inline-flex min-w-[7.5rem] items-center justify-center rounded-2xl border-2 border-moss bg-moss px-4 py-2.5 text-sm font-bold text-cream shadow-sm transition hover:brightness-110"
+        >
+          {formatMatchVenue(form.venue)}
+        </button>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={form.isOfficial}
+          onClick={() => onIsOfficialChange(!form.isOfficial)}
+          className={
+            form.isOfficial
+              ? "inline-flex min-w-[7.5rem] items-center justify-center rounded-2xl border-2 border-moss bg-moss px-4 py-2.5 text-sm font-bold text-cream shadow-sm transition hover:brightness-110"
+              : "inline-flex min-w-[7.5rem] items-center justify-center rounded-2xl border-2 border-bark/15 bg-white/80 px-4 py-2.5 text-sm font-bold text-bark/70 transition hover:bg-bark/5"
+          }
+        >
+          {formatMatchOfficial(form.isOfficial)}
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -1082,7 +1123,7 @@ function RegisterPanel({
           </span>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {PLAYERS.map((player) => {
+          {players.map((player) => {
             const selected = form.participants.includes(player);
             return (
               <button
@@ -1176,7 +1217,7 @@ function RegisterPanel({
               <div key={player} className="rounded-2xl border-2 border-bark/10 bg-white/50 px-3 py-2">
                 <span className={`mb-2 flex flex-wrap items-center gap-2 text-sm font-bold ${player === form.winner ? "text-berry" : "text-bark"}`}>
                   {player}
-                  {!isLeaguePlayer(player) ? (
+                  {!isLeaguePlayer(player, players) ? (
                     <span className="rounded-full bg-bark/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bark/60">
                       Temporário
                     </span>
@@ -1514,6 +1555,7 @@ function HistoryPanel({
   const [coalitionFilter, setCoalitionFilter] = useState<"all" | "coalition" | "coalition_win" | "no_coalition">("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
   const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
+  const players = data.players;
 
   const historyMatches = useMemo(() => {
     return data.matches.filter((match) => {
@@ -1602,7 +1644,7 @@ function HistoryPanel({
             onChange={(event) => setPlayerFilter(event.target.value)}
           >
             <option value="all">Todos</option>
-            {PLAYERS.map((player) => (
+            {players.map((player) => (
               <option key={player} value={player}>
                 {player}
               </option>
@@ -1753,7 +1795,13 @@ function LogsTerminal({ logs }: { logs: ActivityLog[] }) {
           logs.map((log) => (
             <div key={log.id} className="space-y-1">
               <div className="text-xs text-[#8eb47a]">
-                [{formatDisplayDateTime(log.createdAt)}] {log.action === "CREATE_MATCH" ? "CREATE" : "DELETE"} by {log.actorName}
+                [{formatDisplayDateTime(log.createdAt)}]{" "}
+                {log.action === "CREATE_MATCH"
+                  ? "CREATE"
+                  : log.action === "CREATE_MEMBER"
+                  ? "MEMBER"
+                  : "DELETE"}{" "}
+                by {log.actorName}
               </div>
               <div>
                 <span className="mr-2 text-[#facc15]">$</span>
@@ -1844,6 +1892,7 @@ function HistoryCard({
             </span>
             <span className="leaf-chip">{formatDisplayDate(match.playedAt)}</span>
             <span className="leaf-chip">{formatMatchVenue(match.venue)}</span>
+            <span className="leaf-chip">{formatMatchOfficial(match.isOfficial)}</span>
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">

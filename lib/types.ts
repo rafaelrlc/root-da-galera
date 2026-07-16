@@ -25,6 +25,7 @@ export type MatchRecord = {
   seasonNumber: number;
   venue: MatchVenue;
   boardMap: MatchMap;
+  isOfficial: boolean;
   guestParticipants: string[];
   createdAt: string;
 };
@@ -36,9 +37,17 @@ export type SeasonOption = {
 
 export type ActivityLog = {
   id: string;
-  action: "CREATE_MATCH" | "DELETE_MATCH";
+  action: "CREATE_MATCH" | "DELETE_MATCH" | "CREATE_MEMBER";
   actorName: string;
   message: string;
+  createdAt: string;
+};
+
+export type MemberRecord = {
+  id: string;
+  name: string;
+  pin: string;
+  isAdmin: boolean;
   createdAt: string;
 };
 
@@ -46,10 +55,12 @@ export type DashboardData = {
   matches: MatchRecord[];
   logs: ActivityLog[];
   seasons: SeasonOption[];
+  players: string[];
   meta: {
     currentSeasonNumber: number;
     currentSeasonLabel: string;
     currentUser: string;
     isGuest: boolean;
+    isAdmin: boolean;
   };
 };

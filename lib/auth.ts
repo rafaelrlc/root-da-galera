@@ -1,23 +1,21 @@
 import { cookies } from "next/headers";
-import { PLAYERS } from "@/lib/constants";
-import { MEMBER_PINS } from "@/lib/server/member-pins";
+import { findMemberByName, findMemberByPin } from "@/lib/db";
 
 export const SESSION_COOKIE = "root-league-member";
 export const GUEST_COOKIE = "root-league-guest";
 
-export function getMemberByPin(pin: string) {
-  return (PLAYERS.find((player) => MEMBER_PINS[player] === pin) ?? null) as (typeof PLAYERS)[number] | null;
+export async function getMemberByPin(pin: string) {
+  return findMemberByPin(pin);
 }
 
 export async function getSessionUser() {
   const cookieStore = await cookies();
   const member = cookieStore.get(SESSION_COOKIE)?.value;
 
-  if (!member || !PLAYERS.includes(member as (typeof PLAYERS)[number])) {
-    return null;
-  }
+  if (!member) return null;
 
-  return member as (typeof PLAYERS)[number];
+  const found = await findMemberByName(member);
+  return found?.name ?? null;
 }
 
 export async function getGuestSession(): Promise<boolean> {
@@ -33,4 +31,25 @@ export async function requireSessionUser() {
   }
 
   return member;
+}
+
+export async function requireAdmin() {
+  const cookieStore = await cookies();
+  const member = cookieStore.get(SESSION_COOKIE)?.value;
+
+  if (!member) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  const found = await findMemberByName(member);
+
+  if (!found) {
+    throw new Error("UNAUTHORIZED");
+  }
+
+  if (!found.isAdmin) {
+    throw new Error("FORBIDDEN");
+  }
+
+  return found.name;
 }

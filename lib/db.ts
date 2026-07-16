@@ -1,11 +1,14 @@
 import { neon } from "@neondatabase/serverless";
 import type { DominanceCard } from "@/lib/constants";
-import { DOMINANCE_CARDS } from "@/lib/constants";
+import { ADMIN_MEMBER_NAMES, DOMINANCE_CARDS, SEED_LEAGUE_PLAYERS } from "@/lib/constants";
 import { isValidSeasonNumber, listSeasonOptions, seasonLabel } from "@/lib/seasons";
 import { deriveGuestParticipants } from "@/lib/league-players";
 import { DEFAULT_MATCH_MAP, normalizeMatchMap, type MatchMap } from "@/lib/match-map";
+import { DEFAULT_MATCH_OFFICIAL, normalizeMatchOfficial } from "@/lib/match-official";
 import { DEFAULT_MATCH_VENUE, normalizeMatchVenue, type MatchVenue } from "@/lib/match-venue";
-import type { ActivityLog, DashboardData, MatchRecord, VagabondCoalition } from "@/lib/types";
+import type { ActivityLog, DashboardData, MatchRecord, MemberRecord, VagabondCoalition } from "@/lib/types";
+
+const PIN_PATTERN = /^\d{4}$/;
 
 function getSql() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -17,7 +20,78 @@ function getSql() {
   return neon(databaseUrl);
 }
 
+let schemaReady: Promise<void> | null = null;
+
+function generateUniquePin(existingPins: Set<string>): string {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const pin = String(Math.floor(Math.random() * 10000)).padStart(4, "0");
+    if (!existingPins.has(pin)) {
+      return pin;
+    }
+  }
+  throw new Error("Não foi possível gerar um PIN único.");
+}
+
+function parseOptionalMemberPins(): Record<string, string> | null {
+  const rawPins = process.env.MEMBER_PINS;
+  if (!rawPins?.trim()) return null;
+
+  const parsed = JSON.parse(rawPins) as Record<string, string>;
+  for (const player of SEED_LEAGUE_PLAYERS) {
+    const pin = parsed[player];
+    if (!pin || !PIN_PATTERN.test(pin)) {
+      throw new Error(`PIN inválido para ${player} em MEMBER_PINS (bootstrap).`);
+    }
+  }
+
+  const pins = Object.values(parsed);
+  if (new Set(pins).size !== pins.length) {
+    throw new Error("MEMBER_PINS contém PINs duplicados.");
+  }
+
+  return parsed;
+}
+
+async function seedMembersIfEmpty() {
+  const sql = getSql();
+  const countResult = (await sql`
+    SELECT COUNT(*)::int AS count
+    FROM members;
+  `) as Array<{ count: number }>;
+
+  if ((countResult[0]?.count ?? 0) > 0) return;
+
+  const envPins = parseOptionalMemberPins();
+  const usedPins = new Set<string>();
+  const adminSet = new Set<string>(ADMIN_MEMBER_NAMES);
+
+  for (const name of SEED_LEAGUE_PLAYERS) {
+    const pin = envPins?.[name] ?? generateUniquePin(usedPins);
+    usedPins.add(pin);
+    await sql`
+      INSERT INTO members (id, name, pin, is_admin)
+      VALUES (
+        ${crypto.randomUUID()},
+        ${name},
+        ${pin},
+        ${adminSet.has(name)}
+      )
+      ON CONFLICT (name) DO NOTHING;
+    `;
+  }
+}
+
 export async function ensureSchema() {
+  if (!schemaReady) {
+    schemaReady = runEnsureSchema().catch((error) => {
+      schemaReady = null;
+      throw error;
+    });
+  }
+  await schemaReady;
+}
+
+async function runEnsureSchema() {
   const sql = getSql();
   await sql`
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -47,6 +121,17 @@ export async function ensureSchema() {
       actor_name TEXT NOT NULL DEFAULT 'Sistema',
       message TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS members (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      pin TEXT NOT NULL UNIQUE,
+      is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      CONSTRAINT members_pin_format CHECK (pin ~ '^[0-9]{4}$')
     );
   `;
 
@@ -122,10 +207,23 @@ export async function ensureSchema() {
   `;
 
   await sql`
+    ALTER TABLE matches
+    ADD COLUMN IF NOT EXISTS is_official BOOLEAN NOT NULL DEFAULT TRUE;
+  `;
+
+  await sql`
+    UPDATE matches
+    SET is_official = ${DEFAULT_MATCH_OFFICIAL}
+    WHERE is_official IS NULL;
+  `;
+
+  await sql`
     INSERT INTO app_settings (key, value)
     VALUES ('current_season', '1')
     ON CONFLICT (key) DO NOTHING;
   `;
+
+  await seedMembersIfEmpty();
 }
 
 export async function getCurrentSeasonNumber() {
@@ -174,6 +272,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
       season_number,
       venue,
       board_map,
+      is_official,
       guest_participants,
       created_at
     FROM matches
@@ -195,6 +294,7 @@ export async function listMatches(): Promise<MatchRecord[]> {
     season_number: number;
     venue: string | null;
     board_map: string | null;
+    is_official: boolean | null;
     guest_participants: string | string[] | null;
     created_at: string;
   }>;
@@ -286,9 +386,10 @@ export async function listMatches(): Promise<MatchRecord[]> {
       seasonNumber: row.season_number,
       venue: normalizeMatchVenue(row.venue),
       boardMap: normalizeMatchMap(row.board_map),
+      isOfficial: normalizeMatchOfficial(row.is_official),
       guestParticipants:
         row.guest_participants == null
-          ? deriveGuestParticipants(participants)
+          ? deriveGuestParticipants(participants, SEED_LEAGUE_PLAYERS)
           : Array.isArray(row.guest_participants)
           ? row.guest_participants
           : (JSON.parse(row.guest_participants) as string[]),
@@ -307,7 +408,7 @@ export async function listLogs(): Promise<ActivityLog[]> {
     LIMIT 100;
   `) as Array<{
     id: string;
-    action: "CREATE_MATCH" | "DELETE_MATCH";
+    action: "CREATE_MATCH" | "DELETE_MATCH" | "CREATE_MEMBER";
     actor_name: string;
     message: string;
     created_at: string;
@@ -322,7 +423,11 @@ export async function listLogs(): Promise<ActivityLog[]> {
   }));
 }
 
-async function createLog(action: "CREATE_MATCH" | "DELETE_MATCH", actorName: string, message: string) {
+async function createLog(
+  action: "CREATE_MATCH" | "DELETE_MATCH" | "CREATE_MEMBER",
+  actorName: string,
+  message: string
+) {
   await ensureSchema();
   const sql = getSql();
 
@@ -347,6 +452,7 @@ export async function createMatch(input: {
   seasonNumber: number;
   venue: MatchVenue;
   boardMap: MatchMap;
+  isOfficial: boolean;
   guestParticipants: string[];
   actorName: string;
 }) {
@@ -385,6 +491,7 @@ export async function createMatch(input: {
       season_number,
       venue,
       board_map,
+      is_official,
       guest_participants
     ) VALUES (
       ${id},
@@ -403,6 +510,7 @@ export async function createMatch(input: {
       ${input.seasonNumber},
       ${input.venue},
       ${input.boardMap},
+      ${Boolean(input.isOfficial)},
       ${JSON.stringify(input.guestParticipants)}
     );
   `;
@@ -410,10 +518,11 @@ export async function createMatch(input: {
   const winners = new Set(input.coalitionWinners ?? [input.winner]);
   const opponents = input.participants.filter((player) => !winners.has(player)).join(", ");
   const dominanceSuffix = input.wonByDominance && input.dominanceCard ? ` via dominância (${input.dominanceCard})` : "";
+  const officialLabel = input.isOfficial ? "oficial" : "casual";
   await createLog(
     "CREATE_MATCH",
     input.actorName,
-    `${input.winner} venceu com ${input.winningFaction}${dominanceSuffix} contra ${opponents} em ${input.playedAt} (${matchSeasonLabel}, ${input.venue === "online" ? "online" : "presencial"})`
+    `${input.winner} venceu com ${input.winningFaction}${dominanceSuffix} contra ${opponents} em ${input.playedAt} (${matchSeasonLabel}, ${input.venue === "online" ? "online" : "presencial"}, ${officialLabel})`
   );
 }
 
@@ -463,19 +572,126 @@ export async function deleteMatch(id: string, actorName: string) {
   }
 }
 
+export async function listMemberNames(): Promise<string[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const result = (await sql`
+    SELECT name
+    FROM members
+    ORDER BY name ASC;
+  `) as Array<{ name: string }>;
+  return result.map((row) => row.name);
+}
+
+export async function listMembers(): Promise<MemberRecord[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const result = (await sql`
+    SELECT id, name, pin, is_admin, created_at
+    FROM members
+    ORDER BY name ASC;
+  `) as Array<{
+    id: string;
+    name: string;
+    pin: string;
+    is_admin: boolean;
+    created_at: string;
+  }>;
+
+  return result.map((row) => ({
+    id: row.id,
+    name: row.name,
+    pin: row.pin,
+    isAdmin: Boolean(row.is_admin),
+    createdAt: row.created_at
+  }));
+}
+
+export async function findMemberByPin(pin: string): Promise<string | null> {
+  if (!PIN_PATTERN.test(pin)) return null;
+  await ensureSchema();
+  const sql = getSql();
+  const result = (await sql`
+    SELECT name
+    FROM members
+    WHERE pin = ${pin}
+    LIMIT 1;
+  `) as Array<{ name: string }>;
+  return result[0]?.name ?? null;
+}
+
+export async function findMemberByName(name: string): Promise<{ name: string; isAdmin: boolean } | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const result = (await sql`
+    SELECT name, is_admin
+    FROM members
+    WHERE name = ${name}
+    LIMIT 1;
+  `) as Array<{ name: string; is_admin: boolean }>;
+
+  const row = result[0];
+  if (!row) return null;
+  return { name: row.name, isAdmin: Boolean(row.is_admin) };
+}
+
+export async function createMember(input: {
+  name: string;
+  actorName: string;
+}): Promise<MemberRecord> {
+  await ensureSchema();
+  const sql = getSql();
+
+  const trimmed = input.name.trim().replace(/\s+/g, " ");
+  if (trimmed.length < 2 || trimmed.length > 24) {
+    throw new Error("O nome precisa ter entre 2 e 24 caracteres.");
+  }
+
+  const existing = await findMemberByName(trimmed);
+  if (existing) {
+    throw new Error("Já existe um membro com esse nome.");
+  }
+
+  const existingPins = (await sql`
+    SELECT pin FROM members;
+  `) as Array<{ pin: string }>;
+  const pin = generateUniquePin(new Set(existingPins.map((row) => row.pin)));
+  const id = crypto.randomUUID();
+
+  await sql`
+    INSERT INTO members (id, name, pin, is_admin)
+    VALUES (${id}, ${trimmed}, ${pin}, FALSE);
+  `;
+
+  await createLog("CREATE_MEMBER", input.actorName, `Membro permanente adicionado: ${trimmed}`);
+
+  return {
+    id,
+    name: trimmed,
+    pin,
+    isAdmin: false,
+    createdAt: new Date().toISOString()
+  };
+}
+
 export async function getDashboardData(currentUser: string, isGuest = false): Promise<DashboardData> {
   const currentSeasonNumber = await getCurrentSeasonNumber();
   const matches = await listMatches();
   const logs = await listLogs();
+  const players = await listMemberNames();
+  const member = isGuest ? null : await findMemberByName(currentUser);
+
   return {
     matches,
     logs,
+    players,
     seasons: [{ label: "All time", value: "all" }, ...listSeasonOptions()],
     meta: {
       currentSeasonNumber,
       currentSeasonLabel: seasonLabel(currentSeasonNumber),
       isGuest,
-      currentUser
+      currentUser,
+      isAdmin: Boolean(member?.isAdmin)
     }
   };
 }

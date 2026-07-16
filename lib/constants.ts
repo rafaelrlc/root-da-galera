@@ -1,4 +1,4 @@
-export const PLAYERS = [
+export const SEED_LEAGUE_PLAYERS = [
   "Rafinha",
   "Reels",
   "Papito",
@@ -8,6 +8,11 @@ export const PLAYERS = [
   "Varanda",
   "Guedes"
 ] as const;
+
+/** @deprecated Use SEED_LEAGUE_PLAYERS for bootstrap only; runtime roster comes from the DB. */
+export const PLAYERS = SEED_LEAGUE_PLAYERS;
+
+export const ADMIN_MEMBER_NAMES = ["Rafinha", "Reels"] as const;
 
 export const FACTIONS = [
   "Marquise de Cat",

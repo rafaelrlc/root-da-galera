@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { Lock, RotateCcw, Shuffle, Swords, UserPlus, Users, X } from "lucide-react";
 import { FactionBadge } from "@/components/faction-badge";
-import { PLAYERS } from "@/lib/constants";
 import { deriveGuestParticipants, isLeaguePlayer, validateGuestName } from "@/lib/league-players";
 import {
   beginDrafting,
@@ -26,16 +25,17 @@ import {
 } from "@/lib/faction-draft";
 
 type Props = {
+  players: string[];
   onApplyToRegister?: (assignments: Record<string, DraftPick>) => void;
 };
 
 const DEFAULT_EXPANSIONS: DraftExpansionId[] = ["base", "riverfolk", "underworld", "marauder"];
 
-function DraftPlayerName({ name }: { name: string }) {
+function DraftPlayerName({ name, players }: { name: string; players: string[] }) {
   return (
     <span className="inline-flex items-center gap-2">
       {name}
-      {!isLeaguePlayer(name) ? (
+      {!isLeaguePlayer(name, players) ? (
         <span className="rounded-full bg-bark/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-bark/60">
           Temporário
         </span>
@@ -44,13 +44,13 @@ function DraftPlayerName({ name }: { name: string }) {
   );
 }
 
-export function FactionDraftPanel({ onApplyToRegister }: Props) {
+export function FactionDraftPanel({ players, onApplyToRegister }: Props) {
   const [session, setSession] = useState<DraftSession>(resetDraftSession);
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [guestInput, setGuestInput] = useState("");
   const [enabledExpansions, setEnabledExpansions] = useState<DraftExpansionId[]>(DEFAULT_EXPANSIONS);
   const [error, setError] = useState<string | null>(null);
-  const guestParticipants = deriveGuestParticipants(selectedPlayers);
+  const guestParticipants = deriveGuestParticipants(selectedPlayers, players);
 
   const remainingPool = useMemo(() => getRemainingPool(session), [session]);
   const currentPicker = useMemo(() => getCurrentPicker(session), [session]);
@@ -69,7 +69,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
 
   function addGuestPlayer(name: string) {
     const trimmed = name.trim().replace(/\s+/g, " ");
-    const guestError = validateGuestName(trimmed, selectedPlayers);
+    const guestError = validateGuestName(trimmed, selectedPlayers, players);
     if (guestError) {
       setError(guestError);
       return;
@@ -83,7 +83,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
   }
 
   function removeGuestPlayer(name: string) {
-    if (isLeaguePlayer(name)) return;
+    if (isLeaguePlayer(name, players)) return;
     setSelectedPlayers((current) => current.filter((player) => player !== name));
   }
 
@@ -162,7 +162,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {PLAYERS.map((player) => {
+            {players.map((player) => {
               const active = selectedPlayers.includes(player);
               return (
                 <button
@@ -304,7 +304,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
               {session.turnOrder.map((player, index) => (
                 <li key={player} className="flex items-center justify-between rounded-2xl bg-white/80 px-3 py-2 text-sm font-semibold">
                   <span>Jogador {index + 1}</span>
-                  <DraftPlayerName name={player} />
+                  <DraftPlayerName name={player} players={players} />
                 </li>
               ))}
             </ol>
@@ -319,7 +319,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
               {session.draftOrder.map((player, index) => (
                 <li key={player} className="flex items-center justify-between rounded-2xl bg-white/80 px-3 py-2 text-sm font-semibold">
                   <span>{index + 1}º a escolher</span>
-                  <DraftPlayerName name={player} />
+                  <DraftPlayerName name={player} players={players} />
                 </li>
               ))}
             </ol>
@@ -359,7 +359,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
             </h2>
             {session.phase === "drafting" && currentPicker ? (
               <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-bark/70">
-                Vez de <DraftPlayerName name={currentPicker} />
+                Vez de <DraftPlayerName name={currentPicker} players={players} />
               </p>
             ) : null}
           </div>
@@ -382,7 +382,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
         {session.pendingVagabond ? (
           <div className="rounded-[24px] border-2 border-moss/25 bg-moss/5 p-4">
             <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-bark">
-              <DraftPlayerName name={session.pendingVagabond.player} />, escolha o Vagabond:
+              <DraftPlayerName name={session.pendingVagabond.player} players={players} />, escolha o Vagabond:
             </p>
             <div className="mt-3 flex flex-wrap gap-3">
               {session.pendingVagabond.options.map((role) => (
@@ -458,7 +458,7 @@ export function FactionDraftPanel({ onApplyToRegister }: Props) {
                       : "border-bark/10 bg-white/65"
                   }`}
                 >
-                  <DraftPlayerName name={player} />
+                  <DraftPlayerName name={player} players={players} />
                   {pick ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <FactionBadge faction={pick.faction} selected />

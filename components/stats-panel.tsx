@@ -7,10 +7,13 @@ import {
   LineChart, Line, CartesianGrid
 } from "recharts";
 import type { DashboardData } from "@/lib/types";
-import { FACTIONS, PLAYERS } from "@/lib/constants";
+import { FACTIONS } from "@/lib/constants";
 import { getLeagueParticipants, getLeagueVictoryRecipients } from "@/lib/league-players";
-import { getVictoryRecipients } from "@/lib/match-utils";
 import { formatMatchMap, MATCH_MAPS, matchesMapFilter, type MatchMapFilter } from "@/lib/match-map";
+import {
+  matchesOfficialFilter,
+  type MatchOfficialFilter
+} from "@/lib/match-official";
 import { matchesVenueFilter, type MatchVenueFilter } from "@/lib/match-venue";
 
 const PLAYER_COLORS: Record<string, string> = {
@@ -23,6 +26,15 @@ const PLAYER_COLORS: Record<string, string> = {
   Varanda:  "#9b59b6",
   Guedes:   "#e07b39",
 };
+
+const FALLBACK_PLAYER_COLORS = ["#4e6a35", "#c0872f", "#7d3c52", "#2a7a9b", "#8b5e3c", "#5b8a5e", "#9b59b6", "#e07b39"];
+
+function playerColor(name: string) {
+  if (PLAYER_COLORS[name]) return PLAYER_COLORS[name];
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) hash = (hash + name.charCodeAt(i) * (i + 1)) % FALLBACK_PLAYER_COLORS.length;
+  return FALLBACK_PLAYER_COLORS[hash];
+}
 
 const FACTION_COLORS: Record<string, string> = {
   "Marquise de Cat":    "#e07b39",
@@ -64,21 +76,26 @@ export function StatsPanel({ data }: { data: DashboardData }) {
   const [seasonFilter, setSeasonFilter] = useState("all");
   const [venueFilter, setVenueFilter] = useState<MatchVenueFilter>("all");
   const [mapFilter, setMapFilter] = useState<MatchMapFilter>("all");
+  const [officialFilter, setOfficialFilter] = useState<MatchOfficialFilter>("all");
+  const [playerFilter, setPlayerFilter] = useState("all");
+  const players = data.players;
 
   const matches = useMemo(
     () =>
-      data.matches.filter(
-        (m) =>
-          (seasonFilter === "all" || m.seasonLabel === seasonFilter) &&
-          matchesVenueFilter(m, venueFilter) &&
-          matchesMapFilter(m, mapFilter)
-      ),
-    [data.matches, seasonFilter, venueFilter, mapFilter]
+      data.matches.filter((m) => {
+        if (seasonFilter !== "all" && m.seasonLabel !== seasonFilter) return false;
+        if (!matchesVenueFilter(m, venueFilter)) return false;
+        if (!matchesMapFilter(m, mapFilter)) return false;
+        if (!matchesOfficialFilter(m, officialFilter)) return false;
+        if (playerFilter !== "all" && !getLeagueParticipants(m).includes(playerFilter)) return false;
+        return true;
+      }),
+    [data.matches, seasonFilter, venueFilter, mapFilter, officialFilter, playerFilter]
   );
 
   // ── 1. Vitórias por jogador ───────────────────────────────────────────────
   const winsByPlayer = useMemo(() => {
-    const map = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
+    const map = new Map<string, number>(players.map((p) => [p, 0]));
     matches.forEach((m) => {
       getLeagueVictoryRecipients(m).forEach((player) => {
         map.set(player, (map.get(player) ?? 0) + 1);
@@ -88,7 +105,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
       .map(([name, wins]) => ({ name, wins }))
       .filter((e) => e.wins > 0)
       .sort((a, b) => b.wins - a.wins);
-  }, [matches]);
+  }, [matches, players]);
 
   // ── 2. Vitórias por facção ────────────────────────────────────────────────
   const winsByFaction = useMemo(() => {
@@ -102,15 +119,15 @@ export function StatsPanel({ data }: { data: DashboardData }) {
 
   // ── 3. Winrate por jogador ────────────────────────────────────────────────
   const winrateByPlayer = useMemo(() => {
-    const played = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
-    const wins   = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
+    const played = new Map<string, number>(players.map((p) => [p, 0]));
+    const wins   = new Map<string, number>(players.map((p) => [p, 0]));
     matches.forEach((m) => {
       getLeagueParticipants(m).forEach((p) => played.set(p, (played.get(p) ?? 0) + 1));
       getLeagueVictoryRecipients(m).forEach((player) => {
         wins.set(player, (wins.get(player) ?? 0) + 1);
       });
     });
-    return PLAYERS
+    return players
       .map((p) => ({
         name: p,
         winrate: played.get(p)! > 0 ? Math.round((wins.get(p)! / played.get(p)!) * 100) : 0,
@@ -118,7 +135,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
       }))
       .filter((e) => e.played > 0)
       .sort((a, b) => b.winrate - a.winrate);
-  }, [matches]);
+  }, [matches, players]);
 
   // ── 4. Evolução acumulada de vitórias por mês ─────────────────────────────
   const evolutionData = useMemo(() => {
@@ -126,7 +143,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
       (a, b) => new Date(a.playedAt).getTime() - new Date(b.playedAt).getTime()
     );
 
-    const cumulative = new Map<string, number>(PLAYERS.map((p) => [p, 0]));
+    const cumulative = new Map<string, number>(players.map((p) => [p, 0]));
     const byMonth: Record<string, Record<string, number>> = {};
 
     sorted.forEach((m) => {
@@ -139,25 +156,99 @@ export function StatsPanel({ data }: { data: DashboardData }) {
     });
 
     return Object.entries(byMonth).map(([month, vals]) => ({ month, ...vals }));
-  }, [matches]);
+  }, [matches, players]);
 
   // Players who have at least one win in filtered matches
   const activePlayers = useMemo(
     () =>
-      PLAYERS.filter((p) =>
+      players.filter((p) =>
         matches.some(
           (m) => getLeagueVictoryRecipients(m).includes(p) || getLeagueParticipants(m).includes(p)
         )
       ),
-    [matches]
+    [matches, players]
+  );
+
+  const filters = (
+    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
+      <label className="space-y-1 text-sm font-semibold">
+        <span>Season</span>
+        <select
+          className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
+          value={seasonFilter}
+          onChange={(e) => setSeasonFilter(e.target.value)}
+        >
+          {data.seasons.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="space-y-1 text-sm font-semibold">
+        <span>Modalidade</span>
+        <select
+          className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
+          value={venueFilter}
+          onChange={(e) => setVenueFilter(e.target.value as MatchVenueFilter)}
+        >
+          <option value="all">Todas</option>
+          <option value="online">Online</option>
+          <option value="presencial">Presencial</option>
+        </select>
+      </label>
+      <label className="space-y-1 text-sm font-semibold">
+        <span>Tipo</span>
+        <select
+          className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
+          value={officialFilter}
+          onChange={(e) => setOfficialFilter(e.target.value as MatchOfficialFilter)}
+        >
+          <option value="all">Todas</option>
+          <option value="official">Oficiais</option>
+          <option value="casual">Casuais</option>
+        </select>
+      </label>
+      <label className="space-y-1 text-sm font-semibold">
+        <span>Mapa</span>
+        <select
+          className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
+          value={mapFilter}
+          onChange={(e) => setMapFilter(e.target.value as MatchMapFilter)}
+        >
+          <option value="all">Todos</option>
+          {MATCH_MAPS.map((map) => (
+            <option key={map} value={map}>
+              {formatMatchMap(map)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="space-y-1 text-sm font-semibold">
+        <span>Jogador</span>
+        <select
+          className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
+          value={playerFilter}
+          onChange={(e) => setPlayerFilter(e.target.value)}
+        >
+          <option value="all">Todos</option>
+          {players.map((player) => (
+            <option key={player} value={player}>
+              {player}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
   );
 
   if (matches.length === 0) {
     return (
       <div className="flex h-full flex-col gap-6 overflow-y-auto pr-1">
-        <div>
-          <h2 className="storybook-title text-2xl">Estatísticas</h2>
-          <p className="mt-1 text-sm text-bark/70">Gráficos e análises das partidas registradas.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="storybook-title text-2xl">Estatísticas</h2>
+            <p className="mt-1 text-sm text-bark/70">Gráficos e análises das partidas registradas.</p>
+          </div>
+          {filters}
         </div>
         <div className="rounded-[24px] border-2 border-dashed border-bark/15 bg-white/45 p-10 text-center text-sm text-bark/60">
           Nenhuma partida registrada ainda para gerar estatísticas.
@@ -173,47 +264,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
           <h2 className="storybook-title text-2xl">Estatísticas</h2>
           <p className="mt-1 text-sm text-bark/70">Gráficos e análises das partidas registradas.</p>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
-          <label className="space-y-1 text-sm font-semibold">
-            <span>Season</span>
-            <select
-              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
-              value={seasonFilter}
-              onChange={(e) => setSeasonFilter(e.target.value)}
-            >
-              {data.seasons.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1 text-sm font-semibold">
-            <span>Modalidade</span>
-            <select
-              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
-              value={venueFilter}
-              onChange={(e) => setVenueFilter(e.target.value as MatchVenueFilter)}
-            >
-              <option value="all">Todas</option>
-              <option value="online">Online</option>
-              <option value="presencial">Presencial</option>
-            </select>
-          </label>
-          <label className="space-y-1 text-sm font-semibold">
-            <span>Mapa</span>
-            <select
-              className="w-full rounded-2xl border-2 border-bark/10 bg-white/80 px-4 py-3 outline-none transition focus:border-moss sm:min-w-40"
-              value={mapFilter}
-              onChange={(e) => setMapFilter(e.target.value as MatchMapFilter)}
-            >
-              <option value="all">Todos</option>
-              {MATCH_MAPS.map((map) => (
-                <option key={map} value={map}>
-                  {formatMatchMap(map)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        {filters}
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -233,7 +284,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
                 paddingAngle={3}
               >
                 {winsByPlayer.map((entry) => (
-                  <Cell key={entry.name} fill={PLAYER_COLORS[entry.name] ?? "#888"} />
+                  <Cell key={entry.name} fill={playerColor(entry.name)} />
                 ))}
               </Pie>
               <Tooltip content={<CustomTooltip />} />
@@ -279,7 +330,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="winrate" name="Winrate" radius={[6, 6, 0, 0]}>
                 {winrateByPlayer.map((entry) => (
-                  <Cell key={entry.name} fill={PLAYER_COLORS[entry.name] ?? "#4e6a35"} />
+                  <Cell key={entry.name} fill={playerColor(entry.name)} />
                 ))}
               </Bar>
             </BarChart>
@@ -299,7 +350,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
                   key={player}
                   type="monotone"
                   dataKey={player}
-                  stroke={PLAYER_COLORS[player] ?? "#888"}
+                  stroke={playerColor(player)}
                   strokeWidth={2}
                   dot={false}
                   connectNulls
@@ -310,7 +361,7 @@ export function StatsPanel({ data }: { data: DashboardData }) {
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
             {activePlayers.map((player) => (
               <span key={player} className="flex items-center gap-1.5 text-xs font-semibold text-bark">
-                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: PLAYER_COLORS[player] ?? "#888" }} />
+                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: playerColor(player) }} />
                 {player}
               </span>
             ))}
