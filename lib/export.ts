@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import { getLeagueParticipants, getLeagueVictoryRecipients, isGuestParticipant } from "@/lib/league-players";
 import { getMatchOpponents, getSortedScores } from "@/lib/match-utils";
 import { formatMatchMap } from "@/lib/match-map";
+import { formatMatchOfficial } from "@/lib/match-official";
 import { formatMatchVenue } from "@/lib/match-venue";
 import type { MatchRecord } from "@/lib/types";
 
@@ -23,6 +24,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
     "Data",
     "Season",
     "Modalidade",
+    "Tipo",
     "Mapa",
     "Vencedor",
     "Facção vencedora",
@@ -51,6 +53,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
       formatDate(match.playedAt),
       match.seasonLabel,
       formatMatchVenue(match.venue),
+      formatMatchOfficial(match.isOfficial),
       formatMatchMap(match.boardMap),
       match.winner,
       match.winningFaction,
@@ -70,6 +73,7 @@ export function exportMatchesToExcel(matches: MatchRecord[]) {
     { wch: 12 },
     { wch: 12 },
     { wch: 12 },
+    { wch: 10 },
     { wch: 12 },
     { wch: 28 },
     { wch: 22 },

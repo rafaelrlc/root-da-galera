@@ -5,7 +5,7 @@ import { getMemberByPin, SESSION_COOKIE } from "@/lib/auth";
 export async function POST(request: NextRequest) {
   const payload = await request.json();
   const pin = String(payload?.pin ?? "");
-  const member = getMemberByPin(pin);
+  const member = await getMemberByPin(pin);
 
   if (!member) {
     return NextResponse.json({ error: "PIN inválido." }, { status: 401 });

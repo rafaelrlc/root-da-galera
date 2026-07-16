@@ -1,31 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSessionUser } from "@/lib/auth";
-import { DOMINANCE_CARDS, FACTIONS, PLAYERS, type DominanceCard } from "@/lib/constants";
+import { DOMINANCE_CARDS, FACTIONS, type DominanceCard } from "@/lib/constants";
 import { deriveGuestParticipants, isLeaguePlayer, validateGuestName } from "@/lib/league-players";
-import { createMatch } from "@/lib/db";
+import { createMatch, listMemberNames } from "@/lib/db";
 import { findVagabondPlayer, formatCoalitionWinner } from "@/lib/match-utils";
 import { normalizeMatchMap } from "@/lib/match-map";
 import { DEFAULT_MATCH_VENUE, isValidMatchVenue, normalizeMatchVenue } from "@/lib/match-venue";
+import { DEFAULT_MATCH_OFFICIAL, normalizeMatchOfficial } from "@/lib/match-official";
 import { isValidSeasonNumber } from "@/lib/seasons";
 import type { VagabondCoalition } from "@/lib/types";
 
-function validatePayload(payload: {
-  winner?: string;
-  participants?: string[];
-  participantFactions?: Record<string, string>;
-  participantScores?: Record<string, number> | null;
-  participantDominances?: Record<string, DominanceCard> | null;
-  winningFaction?: string;
-  dominanceCard?: string | null;
-  vagabondCoalition?: VagabondCoalition | null;
-  coalitionWinners?: string[] | null;
-  coalitionWon?: boolean;
-  playedAt?: string;
-  seasonNumber?: number;
-  venue?: string;
-  boardMap?: string;
-  guestParticipants?: string[];
-}) {
+function validatePayload(
+  payload: {
+    winner?: string;
+    participants?: string[];
+    participantFactions?: Record<string, string>;
+    participantScores?: Record<string, number> | null;
+    participantDominances?: Record<string, DominanceCard> | null;
+    winningFaction?: string;
+    dominanceCard?: string | null;
+    vagabondCoalition?: VagabondCoalition | null;
+    coalitionWinners?: string[] | null;
+    coalitionWon?: boolean;
+    playedAt?: string;
+    seasonNumber?: number;
+    venue?: string;
+    boardMap?: string;
+    isOfficial?: boolean;
+    guestParticipants?: string[];
+  },
+  leaguePlayers: string[]
+) {
   if (!Array.isArray(payload.participants) || payload.participants.length < 3 || payload.participants.length > 6) {
     return "A partida precisa ter entre 3 e 6 participantes.";
   }
@@ -34,10 +39,15 @@ function validatePayload(payload: {
     return "Os participantes não podem se repetir.";
   }
 
-  const guestParticipants = payload.guestParticipants ?? deriveGuestParticipants(payload.participants ?? []);
+  const guestParticipants =
+    payload.guestParticipants ?? deriveGuestParticipants(payload.participants ?? [], leaguePlayers);
 
   for (const guest of guestParticipants) {
-    const guestError = validateGuestName(guest, payload.participants?.filter((player) => player !== guest));
+    const guestError = validateGuestName(
+      guest,
+      payload.participants?.filter((player) => player !== guest),
+      leaguePlayers
+    );
     if (guestError) {
       return `Jogador temporário inválido: ${guestError}`;
     }
@@ -48,10 +58,10 @@ function validatePayload(payload: {
 
   for (const participant of payload.participants ?? []) {
     const isGuest = guestParticipants.includes(participant);
-    if (!isLeaguePlayer(participant) && !isGuest) {
+    if (!isLeaguePlayer(participant, leaguePlayers) && !isGuest) {
       return `Participante inválido: ${participant}.`;
     }
-    if (isLeaguePlayer(participant) && isGuest) {
+    if (isLeaguePlayer(participant, leaguePlayers) && isGuest) {
       return "Jogador da liga não pode ser marcado como temporário.";
     }
   }
@@ -211,6 +221,10 @@ function validatePayload(payload: {
     return "Modalidade inválida (online ou presencial).";
   }
 
+  if (payload.isOfficial !== undefined && typeof payload.isOfficial !== "boolean") {
+    return "Tipo de partida inválido (oficial ou casual).";
+  }
+
   return null;
 }
 
@@ -223,7 +237,8 @@ export async function POST(request: NextRequest) {
   }
 
   const payload = await request.json();
-  const error = validatePayload(payload);
+  const leaguePlayers = await listMemberNames();
+  const error = validatePayload(payload, leaguePlayers);
 
   if (error) {
     return NextResponse.json({ error }, { status: 400 });
@@ -258,7 +273,8 @@ export async function POST(request: NextRequest) {
     seasonNumber: payload.seasonNumber,
     venue: normalizeMatchVenue(payload.venue),
     boardMap: normalizeMatchMap(payload.boardMap),
-    guestParticipants: payload.guestParticipants ?? deriveGuestParticipants(payload.participants),
+    isOfficial: normalizeMatchOfficial(payload.isOfficial ?? DEFAULT_MATCH_OFFICIAL),
+    guestParticipants: payload.guestParticipants ?? deriveGuestParticipants(payload.participants, leaguePlayers),
     actorName
   });
 
