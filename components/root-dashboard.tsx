@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronDown, Download, LoaderCircle, LogOut, Swords, Trophy, Trash2, Trees, User, UserPlus, X } from "lucide-react";
+import { DominanceBadge } from "@/components/dominance-badge";
 import { PlayerDominanceSelect } from "@/components/player-dominance-select";
 import { FACTIONS, FACTION_FILTERS, type DominanceCard } from "@/lib/constants";
 import { exportMatchesToExcel } from "@/lib/export";
 import {
   findVagabondPlayer,
   formatCoalitionWinner,
-  formatParticipantDominances,
   formatVagabondCoalitionNote,
   getAvailableDominanceCards,
   getFactionsInPlay,
@@ -1286,8 +1286,8 @@ function RegisterPanel({
                           <span className="text-xs font-semibold text-bark/40">ou</span>
                         </>
                       ) : (
-                        <span className="rounded-full bg-moss/15 px-2 py-1 text-xs font-bold text-moss">
-                          Dominância: {playerDominance}
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-moss/15 px-2 py-1 text-xs font-bold text-moss">
+                          Dominância: <DominanceBadge card={playerDominance} />
                         </span>
                       )}
                       <PlayerDominanceSelect
@@ -1912,12 +1912,19 @@ function HistoryCard({
                 .join(", ")}
             </p>
             {getWinnerDominanceCard(match) ? (
-              <p className="mt-1 text-xs font-semibold text-bark/60">
-                Dominância: {getWinnerDominanceCard(match)}
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-bark/60">
+                Dominância: <DominanceBadge card={getWinnerDominanceCard(match)!} />
               </p>
             ) : null}
-            {formatParticipantDominances(match) ? (
-              <p className="mt-1 text-xs text-bark/55">{formatParticipantDominances(match)}</p>
+            {match.participantDominances && Object.keys(match.participantDominances).length > 0 ? (
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-bark/55">
+                {Object.entries(match.participantDominances).map(([player, card], index, entries) => (
+                  <span key={player} className="inline-flex items-center gap-1">
+                    {player}: <DominanceBadge card={card} />
+                    {index < entries.length - 1 ? <span aria-hidden>·</span> : null}
+                  </span>
+                ))}
+              </p>
             ) : null}
             {getSortedScores(match).length > 0 ? (
               <p className="mt-2 text-xs text-bark/65">

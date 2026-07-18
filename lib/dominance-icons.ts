@@ -1,12 +1,20 @@
+import bird from "@/lib/imgs/bird.png";
+import fox from "@/lib/imgs/fox.png";
+import mouse from "@/lib/imgs/mouse.png";
+import rabbit from "@/lib/imgs/rabbit.png";
 import type { DominanceCard } from "@/lib/constants";
+import type { StaticImageData } from "next/image";
 
-/** Placeholder até as imagens das cartas de dominância serem adicionadas. */
-export const DOMINANCE_CARD_PLACEHOLDERS: Record<
-  DominanceCard,
-  { label: string; emoji: string; accent: string }
-> = {
-  Coelho: { label: "Coelho", emoji: "🐰", accent: "from-amber-100 to-amber-300" },
-  Raposa: { label: "Raposa", emoji: "🦊", accent: "from-orange-100 to-orange-300" },
-  Rato: { label: "Rato", emoji: "🐀", accent: "from-stone-100 to-stone-300" },
-  Pássaro: { label: "Pássaro", emoji: "🐦", accent: "from-sky-100 to-sky-300" }
+export const DOMINANCE_ICONS: Record<DominanceCard, StaticImageData> = {
+  Coelho: rabbit,
+  Raposa: fox,
+  Rato: mouse,
+  Pássaro: bird
+};
+
+export const DOMINANCE_CARD_LABELS: Record<DominanceCard, string> = {
+  Coelho: "Coelho",
+  Raposa: "Raposa",
+  Rato: "Rato",
+  Pássaro: "Pássaro"
 };
